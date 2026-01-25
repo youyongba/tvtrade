@@ -116,6 +116,301 @@
             50% { opacity: 0.5; }
         }
 
+        .status-item.clickable {
+            cursor: pointer;
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .status-item.clickable:hover {
+            background: var(--bg-hover);
+        }
+
+        .header-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--accent-cyan-dim);
+            border: 1px solid var(--accent-cyan);
+            border-radius: 8px;
+            color: var(--accent-cyan);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        .header-btn:hover {
+            background: var(--accent-cyan);
+            color: var(--bg-primary);
+        }
+
+        .header-btn.logged-in {
+            background: transparent;
+            border-color: var(--success);
+            color: var(--success);
+        }
+
+        .user-icon {
+            font-size: 1rem;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            width: 100%;
+            max-width: 440px;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .modal-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.25rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            padding: 1.5rem;
+        }
+
+        .modal-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-tab {
+            flex: 1;
+            padding: 0.75rem;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        .modal-tab:hover {
+            background: var(--bg-hover);
+        }
+
+        .modal-tab.active {
+            background: var(--accent-cyan-dim);
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+
+        .modal-actions button {
+            flex: 1;
+        }
+
+        .btn-secondary {
+            padding: 0.875rem 1.5rem;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .mono-input {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        .password-input-wrapper {
+            position: relative;
+        }
+
+        .password-input-wrapper input {
+            padding-right: 3rem;
+        }
+
+        .toggle-password {
+            position: absolute;
+            right: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+            opacity: 0.5;
+            transition: opacity 0.2s;
+        }
+
+        .toggle-password:hover {
+            opacity: 1;
+        }
+
+        .api-warning {
+            display: flex;
+            gap: 0.75rem;
+            padding: 1rem;
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 10px;
+            margin-top: 1rem;
+        }
+
+        .api-warning .warning-icon {
+            font-size: 1.25rem;
+        }
+
+        .api-warning strong {
+            display: block;
+            font-size: 0.875rem;
+            color: var(--warning);
+            margin-bottom: 0.25rem;
+        }
+
+        .api-warning p {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .webhook-url-display {
+            margin-bottom: 1.5rem;
+        }
+
+        .webhook-url-box {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            margin-top: 0.5rem;
+        }
+
+        .webhook-url-box code {
+            flex: 1;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--accent-cyan);
+            word-break: break-all;
+        }
+
+        .form-hint {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+        }
+
+        .webhook-test-section {
+            margin-top: 1.5rem;
+        }
+
+        .webhook-status-box {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            margin-top: 0.5rem;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+
+        .status-indicator.connected {
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+
+        .status-indicator.disconnected {
+            background: var(--danger);
+        }
+
         /* Main Layout */
         .main-container {
             max-width: 1600px;
@@ -1079,24 +1374,155 @@
 <body>
     <header class="header">
         <div class="header-content">
-            <div class="logo">
-                <div class="logo-icon">TV</div>
-                <span class="logo-text">TVTrade</span>
-            </div>
+            <span class="logo-text">TVTrade</span>
             <div class="header-status">
-                <div class="status-item">
-                    <span class="status-dot"></span>
-                    <span>Webhook 已连接</span>
+                <div class="status-item clickable" onclick="openModal('webhookModal')">
+                    <span class="status-dot" id="webhookDot"></span>
+                    <span id="webhookStatus">Webhook 未配置</span>
+                </div>
+                <div class="status-item clickable" onclick="openModal('exchangeModal')">
+                    <span id="exchangeStatus">交易所: 未连接</span>
                 </div>
                 <div class="status-item">
-                    <span>交易所: Binance Futures</span>
+                    <span id="balanceDisplay" style="font-family: 'JetBrains Mono', monospace; color: var(--text-muted);">余额: --</span>
                 </div>
-                <div class="status-item">
-                    <span style="font-family: 'JetBrains Mono', monospace; color: var(--accent-gold);">余额: $12,450.00</span>
-                </div>
+                <button class="header-btn" id="userBtn" onclick="openModal('loginModal')">
+                    <span class="user-icon">👤</span>
+                    <span id="userDisplay">登录</span>
+                </button>
             </div>
         </div>
     </header>
+
+    <!-- Login Modal -->
+    <div class="modal-overlay" id="loginModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">🔐 用户登录</h3>
+                <button class="modal-close" onclick="closeModal('loginModal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-tabs">
+                    <button class="modal-tab active" onclick="switchAuthTab('login')">登录</button>
+                    <button class="modal-tab" onclick="switchAuthTab('register')">注册</button>
+                </div>
+                <div id="loginForm">
+                    <div class="form-group">
+                        <label class="form-label">邮箱 / 用户名</label>
+                        <input type="text" class="form-input" id="loginEmail" placeholder="请输入邮箱或用户名">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">密码</label>
+                        <input type="password" class="form-input" id="loginPassword" placeholder="请输入密码">
+                    </div>
+                    <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
+                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem;">
+                            <input type="checkbox" id="rememberMe"> 记住我
+                        </label>
+                        <a href="#" style="color: var(--accent-cyan); font-size: 0.875rem; text-decoration: none;">忘记密码?</a>
+                    </div>
+                    <button class="btn-primary" style="width: 100%; margin-top: 1rem;" onclick="handleLogin()">登 录</button>
+                </div>
+                <div id="registerForm" style="display: none;">
+                    <div class="form-group">
+                        <label class="form-label">用户名</label>
+                        <input type="text" class="form-input" id="regUsername" placeholder="请输入用户名">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">邮箱</label>
+                        <input type="email" class="form-input" id="regEmail" placeholder="请输入邮箱">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">密码</label>
+                        <input type="password" class="form-input" id="regPassword" placeholder="请设置密码 (至少6位)">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">确认密码</label>
+                        <input type="password" class="form-input" id="regConfirmPassword" placeholder="请再次输入密码">
+                    </div>
+                    <button class="btn-primary" style="width: 100%; margin-top: 1rem;" onclick="handleRegister()">注 册</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Exchange API Modal -->
+    <div class="modal-overlay" id="exchangeModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">🔗 交易所 API 配置</h3>
+                <button class="modal-close" onclick="closeModal('exchangeModal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">选择交易所</label>
+                    <select class="form-input" id="exchangeSelect">
+                        <option value="binance">Binance Futures</option>
+                        <option value="okx">OKX</option>
+                        <option value="bybit">Bybit</option>
+                        <option value="bitget">Bitget</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">API Key</label>
+                    <input type="text" class="form-input mono-input" id="apiKey" placeholder="请输入 API Key">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">API Secret</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" class="form-input mono-input" id="apiSecret" placeholder="请输入 API Secret">
+                        <button class="toggle-password" onclick="togglePasswordVisibility('apiSecret')">👁️</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Passphrase (部分交易所需要)</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" class="form-input mono-input" id="apiPassphrase" placeholder="可选，OKX等交易所需要">
+                        <button class="toggle-password" onclick="togglePasswordVisibility('apiPassphrase')">👁️</button>
+                    </div>
+                </div>
+                <div class="api-warning">
+                    <span class="warning-icon">⚠️</span>
+                    <div>
+                        <strong>安全提示</strong>
+                        <p>请确保您的API Key仅开启交易权限，不要开启提币权限。建议设置IP白名单。</p>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-secondary" onclick="testApiConnection()">测试连接</button>
+                    <button class="btn-primary" onclick="saveExchangeConfig()">保存配置</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Webhook Config Modal -->
+    <div class="modal-overlay" id="webhookModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">📡 Webhook 配置</h3>
+                <button class="modal-close" onclick="closeModal('webhookModal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="webhook-url-display">
+                    <label class="form-label">您的 Webhook URL</label>
+                    <div class="webhook-url-box">
+                        <code id="myWebhookUrl">https://tvtrade.io/webhook/--</code>
+                        <button class="copy-btn" onclick="copyMyWebhookUrl()">复制</button>
+                    </div>
+                    <p class="form-hint">将此URL填入TradingView警报的Webhook URL字段</p>
+                </div>
+                <div class="webhook-test-section">
+                    <label class="form-label">Webhook 状态</label>
+                    <div class="webhook-status-box" id="webhookStatusBox">
+                        <span class="status-indicator disconnected" id="webhookIndicator"></span>
+                        <span id="webhookConnectionText">等待连接...</span>
+                    </div>
+                </div>
+                <button class="btn-primary" style="width: 100%; margin-top: 1.5rem;" onclick="regenerateWebhook()">重新生成 Webhook URL</button>
+            </div>
+        </div>
+    </div>
 
     <main class="main-container">
         <!-- Left Panel - Configuration -->
@@ -1302,6 +1728,280 @@
     </main>
 
     <script>
+        // ==================== 用户和API配置 ====================
+        
+        // 用户数据
+        let currentUser = JSON.parse(localStorage.getItem('tvtrade_user') || 'null');
+        let exchangeConfig = JSON.parse(localStorage.getItem('tvtrade_exchange') || 'null');
+        let webhookConfig = JSON.parse(localStorage.getItem('tvtrade_webhook') || 'null');
+
+        // 弹窗控制
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.add('active');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+
+        // 点击弹窗外部关闭
+        document.querySelectorAll('.modal-overlay').forEach(overlay => {
+            overlay.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    this.classList.remove('active');
+                }
+            });
+        });
+
+        // 切换登录/注册标签
+        function switchAuthTab(tab) {
+            document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            if (tab === 'login') {
+                document.getElementById('loginForm').style.display = 'block';
+                document.getElementById('registerForm').style.display = 'none';
+            } else {
+                document.getElementById('loginForm').style.display = 'none';
+                document.getElementById('registerForm').style.display = 'block';
+            }
+        }
+
+        // 登录处理
+        function handleLogin() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            if (!email || !password) {
+                showToast('请填写邮箱和密码', 'error');
+                return;
+            }
+
+            // 模拟登录
+            currentUser = {
+                id: Date.now(),
+                email: email,
+                username: email.split('@')[0],
+                createdAt: new Date().toISOString()
+            };
+            
+            localStorage.setItem('tvtrade_user', JSON.stringify(currentUser));
+            
+            // 生成webhook
+            if (!webhookConfig) {
+                webhookConfig = {
+                    url: `https://tvtrade.io/webhook/${generateId()}`,
+                    createdAt: new Date().toISOString()
+                };
+                localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
+            }
+            
+            updateUIState();
+            closeModal('loginModal');
+            showToast(`欢迎回来, ${currentUser.username}!`, 'success');
+        }
+
+        // 注册处理
+        function handleRegister() {
+            const username = document.getElementById('regUsername').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            const confirmPassword = document.getElementById('regConfirmPassword').value;
+
+            if (!username || !email || !password) {
+                showToast('请填写所有必填项', 'error');
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                showToast('两次输入的密码不一致', 'error');
+                return;
+            }
+
+            if (password.length < 6) {
+                showToast('密码至少需要6位', 'error');
+                return;
+            }
+
+            // 模拟注册
+            currentUser = {
+                id: Date.now(),
+                email: email,
+                username: username,
+                createdAt: new Date().toISOString()
+            };
+            
+            // 生成webhook
+            webhookConfig = {
+                url: `https://tvtrade.io/webhook/${generateId()}`,
+                createdAt: new Date().toISOString()
+            };
+            
+            localStorage.setItem('tvtrade_user', JSON.stringify(currentUser));
+            localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
+            
+            updateUIState();
+            closeModal('loginModal');
+            showToast('注册成功，欢迎使用 TVTrade!', 'success');
+        }
+
+        // 退出登录
+        function handleLogout() {
+            currentUser = null;
+            localStorage.removeItem('tvtrade_user');
+            updateUIState();
+            showToast('已退出登录', 'success');
+        }
+
+        // 生成随机ID
+        function generateId() {
+            return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        }
+
+        // 密码可见性切换
+        function togglePasswordVisibility(inputId) {
+            const input = document.getElementById(inputId);
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        // 保存交易所配置
+        function saveExchangeConfig() {
+            const exchange = document.getElementById('exchangeSelect').value;
+            const apiKey = document.getElementById('apiKey').value;
+            const apiSecret = document.getElementById('apiSecret').value;
+            const passphrase = document.getElementById('apiPassphrase').value;
+
+            if (!apiKey || !apiSecret) {
+                showToast('请填写 API Key 和 Secret', 'error');
+                return;
+            }
+
+            exchangeConfig = {
+                exchange: exchange,
+                apiKey: apiKey,
+                apiSecret: apiSecret,
+                passphrase: passphrase,
+                connected: true,
+                balance: 12450.00, // 模拟余额
+                savedAt: new Date().toISOString()
+            };
+
+            localStorage.setItem('tvtrade_exchange', JSON.stringify(exchangeConfig));
+            updateUIState();
+            closeModal('exchangeModal');
+            showToast('交易所配置已保存', 'success');
+        }
+
+        // 测试API连接
+        function testApiConnection() {
+            const apiKey = document.getElementById('apiKey').value;
+            const apiSecret = document.getElementById('apiSecret').value;
+
+            if (!apiKey || !apiSecret) {
+                showToast('请先填写 API Key 和 Secret', 'error');
+                return;
+            }
+
+            showToast('正在测试连接...', 'success');
+            
+            // 模拟API测试
+            setTimeout(() => {
+                showToast('API连接测试成功!', 'success');
+            }, 1500);
+        }
+
+        // 复制Webhook URL
+        function copyMyWebhookUrl() {
+            if (!webhookConfig) {
+                showToast('请先登录生成 Webhook URL', 'error');
+                return;
+            }
+            navigator.clipboard.writeText(webhookConfig.url);
+            showToast('Webhook URL 已复制', 'success');
+        }
+
+        // 重新生成Webhook
+        function regenerateWebhook() {
+            if (!currentUser) {
+                showToast('请先登录', 'error');
+                return;
+            }
+            
+            webhookConfig = {
+                url: `https://tvtrade.io/webhook/${generateId()}`,
+                createdAt: new Date().toISOString()
+            };
+            localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
+            updateUIState();
+            showToast('已生成新的 Webhook URL', 'success');
+        }
+
+        // 更新界面状态
+        function updateUIState() {
+            const userBtn = document.getElementById('userBtn');
+            const userDisplay = document.getElementById('userDisplay');
+            const webhookStatus = document.getElementById('webhookStatus');
+            const webhookDot = document.getElementById('webhookDot');
+            const exchangeStatus = document.getElementById('exchangeStatus');
+            const balanceDisplay = document.getElementById('balanceDisplay');
+            const myWebhookUrl = document.getElementById('myWebhookUrl');
+            const webhookUrlInput = document.getElementById('webhookUrl');
+            const webhookIndicator = document.getElementById('webhookIndicator');
+            const webhookConnectionText = document.getElementById('webhookConnectionText');
+
+            // 用户状态
+            if (currentUser) {
+                userDisplay.textContent = currentUser.username;
+                userBtn.classList.add('logged-in');
+                userBtn.onclick = handleLogout;
+            } else {
+                userDisplay.textContent = '登录';
+                userBtn.classList.remove('logged-in');
+                userBtn.onclick = () => openModal('loginModal');
+            }
+
+            // Webhook状态
+            if (webhookConfig) {
+                webhookStatus.textContent = 'Webhook 已配置';
+                webhookDot.style.background = 'var(--success)';
+                myWebhookUrl.textContent = webhookConfig.url;
+                if (webhookUrlInput) webhookUrlInput.value = webhookConfig.url;
+                webhookIndicator.classList.add('connected');
+                webhookIndicator.classList.remove('disconnected');
+                webhookConnectionText.textContent = '连接正常';
+            } else {
+                webhookStatus.textContent = 'Webhook 未配置';
+                webhookDot.style.background = 'var(--text-muted)';
+                myWebhookUrl.textContent = '请先登录生成 Webhook URL';
+                webhookIndicator.classList.remove('connected');
+                webhookIndicator.classList.add('disconnected');
+                webhookConnectionText.textContent = '等待登录...';
+            }
+
+            // 交易所状态
+            if (exchangeConfig && exchangeConfig.connected) {
+                const exchangeNames = {
+                    'binance': 'Binance Futures',
+                    'okx': 'OKX',
+                    'bybit': 'Bybit',
+                    'bitget': 'Bitget'
+                };
+                exchangeStatus.textContent = `交易所: ${exchangeNames[exchangeConfig.exchange] || exchangeConfig.exchange}`;
+                balanceDisplay.textContent = `余额: $${exchangeConfig.balance.toLocaleString()}`;
+                balanceDisplay.style.color = 'var(--accent-gold)';
+                
+                // 填充已保存的配置
+                document.getElementById('exchangeSelect').value = exchangeConfig.exchange;
+                document.getElementById('apiKey').value = exchangeConfig.apiKey;
+                document.getElementById('apiSecret').value = exchangeConfig.apiSecret;
+                document.getElementById('apiPassphrase').value = exchangeConfig.passphrase || '';
+            } else {
+                exchangeStatus.textContent = '交易所: 未连接';
+                balanceDisplay.textContent = '余额: --';
+                balanceDisplay.style.color = 'var(--text-muted)';
+            }
+        }
+
         // Data stores
         let takeProfits = [
             { id: 1, closePercent: '50', orderType: 'market', enabled: true },
@@ -1588,7 +2288,7 @@
             const orderType = document.querySelectorAll('.toggle-group')[1].querySelector('.toggle-btn.active')?.textContent.includes('市价') ? 'market' : 'limit';
             const leverage = document.querySelector('input[max="125"]').value;
             const positionSize = document.querySelector('input[max="100"]').value;
-            const symbol = document.querySelector('select').value;
+            const symbol = document.querySelector('.left-panel select').value;
             
             return { direction, orderType, leverage, positionSize, symbol };
         }
@@ -2032,6 +2732,7 @@
         renderSavedConfigs();
         renderActivities();
         updatePosition();
+        updateUIState();
         
         // 监听设置变化更新持仓
         document.querySelectorAll('.toggle-group').forEach(group => {
