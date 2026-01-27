@@ -1713,7 +1713,7 @@
                         </div>
                     </div>
 
-                    <button class="btn-primary">
+                    <button class="btn-primary" id="saveConfigBtn">
                         <span>💾</span>
                         保存配置
                     </button>
@@ -2486,6 +2486,8 @@
                 positionSize: settings.positionSize,
                 takeProfits: JSON.parse(JSON.stringify(takeProfits)),
                 stopLosses: JSON.parse(JSON.stringify(stopLosses)),
+                protectionSL: document.getElementById('protectionSL')?.checked || false,
+                protectionOrderType: document.querySelector('#protectionOrderType .mini-toggle-btn.active')?.dataset.type || 'market',
                 createdAt: new Date().toISOString()
             };
             
@@ -2543,6 +2545,15 @@
             stopLosses = JSON.parse(JSON.stringify(config.stopLosses));
             tpIdCounter = Math.max(...takeProfits.map(t => t.id), 0) + 1;
             slIdCounter = Math.max(...stopLosses.map(s => s.id), 0) + 1;
+            
+            // 恢复保护性止损设置
+            const protectionCheckbox = document.getElementById('protectionSL');
+            if (protectionCheckbox) {
+                protectionCheckbox.checked = config.protectionSL || false;
+            }
+            if (config.protectionOrderType) {
+                setProtectionOrderType(config.protectionOrderType);
+            }
             
             renderTakeProfits();
             renderStopLosses();
@@ -2813,7 +2824,7 @@
         }
 
         // 绑定保存按钮
-        document.querySelector('.btn-primary').addEventListener('click', saveCurrentConfig);
+        document.getElementById('saveConfigBtn').addEventListener('click', saveCurrentConfig);
 
         // ==================== 初始化 ====================
         
