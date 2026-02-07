@@ -1,9 +1,42 @@
 // ==================== 用户和API配置 ====================
 
+// API 基础路径
+const API_BASE = '/api';
+
 // 用户数据
 let currentUser = JSON.parse(localStorage.getItem('tvtrade_user') || 'null');
+let authToken = localStorage.getItem('tvtrade_token') || null;
 let exchangeConfig = JSON.parse(localStorage.getItem('tvtrade_exchange') || 'null');
 let webhookConfig = JSON.parse(localStorage.getItem('tvtrade_webhook') || 'null');
+
+// API 请求工具函数
+async function apiRequest(endpoint, options = {}) {
+    const config = {
+        headers: {
+            'Content-Type': 'application/json',
+            ...options.headers
+        },
+        ...options
+    };
+
+    // 添加认证头
+    if (authToken) {
+        config.headers['Authorization'] = `Bearer ${authToken}`;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}${endpoint}`, config);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error?.message || '请求失败');
+        }
+
+        return data;
+    } catch (error) {
+        throw error;
+    }
+}
 
 // 弹窗控制
 function openModal(modalId) {
@@ -38,7 +71,7 @@ function switchAuthTab(tab) {
 }
 
 // 登录处理
-function handleLogin() {
+async function handleLogin() {
     const email = document.getElementById('loginEmail').value;
     const password = document.getElementById('loginPassword').value;
 
@@ -47,32 +80,37 @@ function handleLogin() {
         return;
     }
 
-    // 模拟登录
-    currentUser = {
-        id: Date.now(),
-        email: email,
-        username: email.split('@')[0],
-        createdAt: new Date().toISOString()
-    };
-    
-    localStorage.setItem('tvtrade_user', JSON.stringify(currentUser));
-    
-    // 生成webhook
-    if (!webhookConfig) {
-        webhookConfig = {
-            url: `https://tvtrade.io/webhook/${generateId()}`,
-            createdAt: new Date().toISOString()
-        };
-        localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
+    try {
+        const result = await apiRequest('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ email, password })
+        });
+
+        // 保存用户数据和token
+        currentUser = result.data.user;
+        authToken = result.data.token;
+        
+        localStorage.setItem('tvtrade_user', JSON.stringify(currentUser));
+        localStorage.setItem('tvtrade_token', authToken);
+
+        // 获取webhook信息（从用户注册时返回的webhook信息加载）
+        await loadUserWebhook();
+
+        updateUIState();
+        closeModal('loginModal');
+        showToast(`欢迎回来, ${currentUser.username}!`, 'success');
+        
+        // 清空表单
+        document.getElementById('loginEmail').value = '';
+        document.getElementById('loginPassword').value = '';
+
+    } catch (error) {
+        showToast(error.message || '登录失败', 'error');
     }
-    
-    updateUIState();
-    closeModal('loginModal');
-    showToast(`欢迎回来, ${currentUser.username}!`, 'success');
 }
 
 // 注册处理
-function handleRegister() {
+async function handleRegister() {
     const username = document.getElementById('regUsername').value;
     const email = document.getElementById('regEmail').value;
     const password = document.getElementById('regPassword').value;
@@ -93,34 +131,102 @@ function handleRegister() {
         return;
     }
 
-    // 模拟注册
-    currentUser = {
-        id: Date.now(),
-        email: email,
-        username: username,
-        createdAt: new Date().toISOString()
-    };
-    
-    // 生成webhook
-    webhookConfig = {
-        url: `https://tvtrade.io/webhook/${generateId()}`,
-        createdAt: new Date().toISOString()
-    };
-    
-    localStorage.setItem('tvtrade_user', JSON.stringify(currentUser));
-    localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
-    
-    updateUIState();
-    closeModal('loginModal');
-    showToast('注册成功，欢迎使用 TVTrade!', 'success');
+    try {
+        const result = await apiRequest('/auth/register', {
+            method: 'POST',
+            body: JSON.stringify({ username, email, password })
+        });
+
+        // 保存用户数据和token
+        currentUser = result.data.user;
+        authToken = result.data.token;
+        
+        localStorage.setItem('tvtrade_user', JSON.stringify(currentUser));
+        localStorage.setItem('tvtrade_token', authToken);
+
+        // 保存webhook配置
+        if (result.data.webhook) {
+            webhookConfig = {
+                url: result.data.webhook.url,
+                token: result.data.webhook.token,
+                createdAt: new Date().toISOString()
+            };
+            localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
+        }
+
+        updateUIState();
+        closeModal('loginModal');
+        showToast('注册成功，欢迎使用 TVTrade!', 'success');
+        
+        // 清空表单
+        document.getElementById('regUsername').value = '';
+        document.getElementById('regEmail').value = '';
+        document.getElementById('regPassword').value = '';
+        document.getElementById('regConfirmPassword').value = '';
+
+    } catch (error) {
+        showToast(error.message || '注册失败', 'error');
+    }
+}
+
+// 加载用户Webhook信息
+async function loadUserWebhook() {
+    try {
+        const result = await apiRequest('/webhook');
+        if (result.success && result.data) {
+            webhookConfig = {
+                url: result.data.url,
+                token: result.data.token,
+                createdAt: result.data.createdAt
+            };
+            localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
+        }
+    } catch (error) {
+        console.error('加载Webhook失败:', error);
+    }
 }
 
 // 退出登录
-function handleLogout() {
+async function handleLogout() {
+    try {
+        // 调用服务端退出登录
+        if (authToken) {
+            await apiRequest('/auth/logout', { method: 'POST' });
+        }
+    } catch (error) {
+        // 即使服务端退出失败，也清除本地数据
+        console.error('Logout error:', error);
+    }
+
+    // 清除本地数据
     currentUser = null;
+    authToken = null;
     localStorage.removeItem('tvtrade_user');
+    localStorage.removeItem('tvtrade_token');
+    
     updateUIState();
     showToast('已退出登录', 'success');
+}
+
+// 验证并刷新用户状态
+async function validateSession() {
+    if (!authToken) return;
+    
+    try {
+        const result = await apiRequest('/auth/me');
+        if (result.success) {
+            currentUser = result.data;
+            localStorage.setItem('tvtrade_user', JSON.stringify(currentUser));
+        }
+    } catch (error) {
+        // Token无效，清除登录状态
+        console.error('Session validation failed:', error);
+        currentUser = null;
+        authToken = null;
+        localStorage.removeItem('tvtrade_user');
+        localStorage.removeItem('tvtrade_token');
+        updateUIState();
+    }
 }
 
 // 生成随机ID
@@ -190,19 +296,31 @@ function copyMyWebhookUrl() {
 }
 
 // 重新生成Webhook
-function regenerateWebhook() {
+async function regenerateWebhook() {
     if (!currentUser) {
         showToast('请先登录', 'error');
         return;
     }
     
-    webhookConfig = {
-        url: `https://tvtrade.io/webhook/${generateId()}`,
-        createdAt: new Date().toISOString()
-    };
-    localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
-    updateUIState();
-    showToast('已生成新的 Webhook URL', 'success');
+    try {
+        const result = await apiRequest('/webhook/regenerate', {
+            method: 'POST'
+        });
+        
+        if (result.success && result.data) {
+            webhookConfig = {
+                url: result.data.url,
+                token: result.data.token,
+                createdAt: new Date().toISOString()
+            };
+            localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
+            updateUIState();
+            updateAllWebhooks();
+            showToast('已生成新的 Webhook URL', 'success');
+        }
+    } catch (error) {
+        showToast(error.message || '重新生成失败', 'error');
+    }
 }
 
 // 更新界面状态
@@ -848,6 +966,13 @@ function showToast(message, type = 'success') {
 document.getElementById('saveConfigBtn').addEventListener('click', saveCurrentConfig);
 
 // ==================== 初始化 ====================
+
+// 页面加载时验证会话
+validateSession().then(() => {
+    if (currentUser && authToken) {
+        loadUserWebhook();
+    }
+});
 
 renderTakeProfits();
 renderStopLosses();

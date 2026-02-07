@@ -3,7 +3,10 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
+
+// Routes
 const authRoutes = require('./routes/auth');
+const webhookRoutes = require('./routes/webhook');
 
 const app = express();
 
@@ -18,8 +21,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Routes
+// API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/webhook', webhookRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
