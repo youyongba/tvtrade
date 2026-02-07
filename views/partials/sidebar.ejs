@@ -1,0 +1,65 @@
+<!-- Current Position -->
+<div class="card position-card" id="positionCard">
+    <div class="card-header">
+        <div class="card-title">
+            <span class="card-title-icon">📊</span>
+            当前持仓
+        </div>
+    </div>
+    <div class="card-body" id="positionBody">
+        <!-- 动态渲染 -->
+    </div>
+</div>
+
+<!-- Webhook URL -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <span class="card-title-icon">🔗</span>
+            Webhook URL
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="webhook-url-section">
+            <div class="webhook-url-input">
+                <input type="text" class="form-input" id="webhookUrl" value="https://tvtrade.io/webhook/abc123xyz" readonly>
+                <button class="copy-btn" onclick="copyWebhookUrl()">复制</button>
+            </div>
+        </div>
+        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.75rem; line-height: 1.5;">
+            将此URL填入TradingView警报的Webhook URL字段
+        </p>
+    </div>
+</div>
+
+<!-- Saved Configs -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <span class="card-title-icon">📁</span>
+            已保存配置
+        </div>
+        <button class="mini-clear-btn" onclick="clearAllConfigs()">清空</button>
+    </div>
+    <div class="card-body">
+        <div class="config-list" id="configList">
+            <!-- 动态渲染 -->
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activity -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">
+            <span class="card-title-icon">📜</span>
+            最近活动
+        </div>
+        <button class="mini-clear-btn" onclick="clearActivities()">清空</button>
+    </div>
+    <div class="card-body">
+        <div id="activityList">
+            <!-- 动态渲染 -->
+        </div>
+    </div>
+</div>

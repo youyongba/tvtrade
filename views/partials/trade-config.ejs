@@ -1,0 +1,135 @@
+<!-- Trading Pair -->
+<div class="form-group">
+    <label class="form-label">交易对</label>
+    <select class="form-input">
+        <option>BTCUSDT</option>
+        <option>ETHUSDT</option>
+        <option>BNBUSDT</option>
+        <option>SOLUSDT</option>
+        <option>XRPUSDT</option>
+    </select>
+</div>
+
+<!-- Direction Toggle -->
+<div class="form-group">
+    <label class="form-label">交易方向</label>
+    <div class="toggle-group">
+        <button class="toggle-btn active long">📈 做多 LONG</button>
+        <button class="toggle-btn short">📉 做空 SHORT</button>
+    </div>
+</div>
+
+<!-- Order Type -->
+<div class="form-group">
+    <label class="form-label">订单类型</label>
+    <div class="toggle-group">
+        <button class="toggle-btn active neutral">市价单</button>
+        <button class="toggle-btn">限价单</button>
+    </div>
+</div>
+
+<!-- Leverage -->
+<div class="form-group">
+    <label class="form-label">杠杆倍数</label>
+    <div class="slider-container">
+        <span class="slider-value">20x</span>
+        <input type="range" class="slider" min="1" max="125" value="20">
+        <div class="slider-marks">
+            <span>1x</span>
+            <span>25x</span>
+            <span>50x</span>
+            <span>75x</span>
+            <span>100x</span>
+            <span>125x</span>
+        </div>
+    </div>
+</div>
+
+<!-- Position Size -->
+<div class="form-group" style="margin-top: 2rem;">
+    <label class="form-label">仓位比例 (可用资金)</label>
+    <div class="slider-container">
+        <span class="slider-value">30%</span>
+        <input type="range" class="slider" min="1" max="100" value="30">
+        <div class="slider-marks">
+            <span>10%</span>
+            <span>25%</span>
+            <span>50%</span>
+            <span>75%</span>
+            <span>100%</span>
+        </div>
+    </div>
+</div>
+
+<!-- 开仓警报消息 -->
+<div class="webhook-container" style="margin-top: 1.5rem;">
+    <div class="webhook-header">
+        <span class="webhook-label">🚀 开仓警报消息</span>
+        <button class="copy-btn" onclick="copyWebhook('openWebhook')">复制</button>
+    </div>
+    <div class="webhook-code" id="openWebhook">{
+  "action": "open_long",
+  "symbol": "BTCUSDT",
+  "leverage": 20,
+  "position_size": "30%",
+  "order_type": "market",
+  "timestamp": "{{timenow}}"
+}</div>
+</div>
+
+<!-- Take Profit Sections -->
+<div style="margin-top: 2rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <label class="form-label" style="margin-bottom: 0;">🎯 分批止盈设置 (每个止盈独立警报)</label>
+        <button class="add-item-btn" onclick="addTakeProfit()">+ 添加止盈</button>
+    </div>
+    
+    <div id="tpContainer">
+        <!-- TP items will be rendered here -->
+    </div>
+    
+    <!-- 成本价保护性止损 -->
+    <div class="protection-sl-option">
+        <div class="protection-row">
+            <label class="protection-checkbox-label">
+                <input type="checkbox" id="protectionSL" onchange="updateAllWebhooks()">
+                <span class="protection-checkbox-text">
+                    🛡️ 止盈触发后挂成本价保护性止损
+                </span>
+            </label>
+            <div class="mini-toggle protection-order-type" id="protectionOrderType">
+                <button class="mini-toggle-btn active" data-type="market" onclick="setProtectionOrderType('market')">市价</button>
+                <button class="mini-toggle-btn" data-type="limit" onclick="setProtectionOrderType('limit')">限价</button>
+            </div>
+        </div>
+        <span class="protection-hint">首个止盈触发后，自动在开仓价挂止损单保护本金</span>
+    </div>
+</div>
+
+<!-- Stop Loss -->
+<div style="margin-top: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <label class="form-label" style="margin-bottom: 0;">🛡️ 止损设置 (每个止损独立警报)</label>
+        <button class="add-item-btn sl-add" onclick="addStopLoss()">+ 添加止损</button>
+    </div>
+    
+    <div id="slContainer">
+        <!-- SL items will be rendered here -->
+    </div>
+</div>
+
+<!-- 一键复制所有消息 -->
+<div class="webhook-container" style="margin-top: 1.5rem; background: linear-gradient(135deg, rgba(0, 212, 170, 0.1), rgba(14, 165, 233, 0.1)); border: 1px solid var(--accent-cyan);">
+    <div class="webhook-header">
+        <span class="webhook-label">📦 所有警报消息汇总</span>
+        <button class="copy-btn" onclick="copyAllWebhooks()" style="background: var(--accent-cyan); color: var(--bg-primary); border-color: var(--accent-cyan);">复制全部</button>
+    </div>
+    <div id="summaryContainer" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-top: 0.5rem;">
+        <!-- Summary items will be rendered here -->
+    </div>
+</div>
+
+<button class="btn-primary" id="saveConfigBtn">
+    <span>💾</span>
+    保存配置
+</button>

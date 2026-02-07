@@ -1,0 +1,48 @@
+<div class="modal-overlay" id="exchangeModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">🔗 交易所 API 配置</h3>
+            <button class="modal-close" onclick="closeModal('exchangeModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">选择交易所</label>
+                <select class="form-input" id="exchangeSelect">
+                    <option value="binance">Binance Futures</option>
+                    <option value="okx">OKX</option>
+                    <option value="bybit">Bybit</option>
+                    <option value="bitget">Bitget</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">API Key</label>
+                <input type="text" class="form-input mono-input" id="apiKey" placeholder="请输入 API Key">
+            </div>
+            <div class="form-group">
+                <label class="form-label">API Secret</label>
+                <div class="password-input-wrapper">
+                    <input type="password" class="form-input mono-input" id="apiSecret" placeholder="请输入 API Secret">
+                    <button class="toggle-password" onclick="togglePasswordVisibility('apiSecret')">👁️</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Passphrase (部分交易所需要)</label>
+                <div class="password-input-wrapper">
+                    <input type="password" class="form-input mono-input" id="apiPassphrase" placeholder="可选，OKX等交易所需要">
+                    <button class="toggle-password" onclick="togglePasswordVisibility('apiPassphrase')">👁️</button>
+                </div>
+            </div>
+            <div class="api-warning">
+                <span class="warning-icon">⚠️</span>
+                <div>
+                    <strong>安全提示</strong>
+                    <p>请确保您的API Key仅开启交易权限，不要开启提币权限。建议设置IP白名单。</p>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="testApiConnection()">测试连接</button>
+                <button class="btn-primary" onclick="saveExchangeConfig()">保存配置</button>
+            </div>
+        </div>
+    </div>
+</div>

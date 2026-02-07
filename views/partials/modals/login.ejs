@@ -1,0 +1,50 @@
+<div class="modal-overlay" id="loginModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">🔐 用户登录</h3>
+            <button class="modal-close" onclick="closeModal('loginModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-tabs">
+                <button class="modal-tab active" onclick="switchAuthTab('login')">登录</button>
+                <button class="modal-tab" onclick="switchAuthTab('register')">注册</button>
+            </div>
+            <div id="loginForm">
+                <div class="form-group">
+                    <label class="form-label">邮箱 / 用户名</label>
+                    <input type="text" class="form-input" id="loginEmail" placeholder="请输入邮箱或用户名">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">密码</label>
+                    <input type="password" class="form-input" id="loginPassword" placeholder="请输入密码">
+                </div>
+                <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem;">
+                        <input type="checkbox" id="rememberMe"> 记住我
+                    </label>
+                    <a href="#" style="color: var(--accent-cyan); font-size: 0.875rem; text-decoration: none;">忘记密码?</a>
+                </div>
+                <button class="btn-primary" style="width: 100%; margin-top: 1rem;" onclick="handleLogin()">登 录</button>
+            </div>
+            <div id="registerForm" style="display: none;">
+                <div class="form-group">
+                    <label class="form-label">用户名</label>
+                    <input type="text" class="form-input" id="regUsername" placeholder="请输入用户名">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">邮箱</label>
+                    <input type="email" class="form-input" id="regEmail" placeholder="请输入邮箱">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">密码</label>
+                    <input type="password" class="form-input" id="regPassword" placeholder="请设置密码 (至少6位)">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">确认密码</label>
+                    <input type="password" class="form-input" id="regConfirmPassword" placeholder="请再次输入密码">
+                </div>
+                <button class="btn-primary" style="width: 100%; margin-top: 1rem;" onclick="handleRegister()">注 册</button>
+            </div>
+        </div>
+    </div>
+</div>

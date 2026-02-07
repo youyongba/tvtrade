@@ -1,0 +1,21 @@
+<header class="header">
+    <div class="header-content">
+        <span class="logo-text">TVTrade</span>
+        <div class="header-status">
+            <div class="status-item clickable" onclick="openModal('webhookModal')">
+                <span class="status-dot" id="webhookDot"></span>
+                <span id="webhookStatus">Webhook 未配置</span>
+            </div>
+            <div class="status-item clickable" onclick="openModal('exchangeModal')">
+                <span id="exchangeStatus">交易所: 未连接</span>
+            </div>
+            <div class="status-item">
+                <span id="balanceDisplay" style="font-family: 'JetBrains Mono', monospace; color: var(--text-muted);">余额: --</span>
+            </div>
+            <button class="header-btn" id="userBtn" onclick="openModal('loginModal')">
+                <span class="user-icon">👤</span>
+                <span id="userDisplay">登录</span>
+            </button>
+        </div>
+    </div>
+</header>

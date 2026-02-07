@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <%- include('partials/head', { title: title }) %>
+</head>
+<body>
+    <%- include('partials/header') %>
+
+    <!-- Login Modal -->
+    <%- include('partials/modals/login') %>
+
+    <!-- Exchange API Modal -->
+    <%- include('partials/modals/exchange') %>
+
+    <!-- Webhook Config Modal -->
+    <%- include('partials/modals/webhook') %>
+
+    <main class="main-container">
+        <!-- Left Panel - Configuration -->
+        <div class="left-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-title-icon">⚙️</span>
+                        创建交易配置
+                    </div>
+                </div>
+                <div class="card-body">
+                    <%- include('partials/trade-config') %>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Sidebar -->
+        <div class="sidebar">
+            <%- include('partials/sidebar') %>
+        </div>
+    </main>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>

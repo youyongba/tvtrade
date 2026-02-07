@@ -1,0 +1,26 @@
+<div class="modal-overlay" id="webhookModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">📡 Webhook 配置</h3>
+            <button class="modal-close" onclick="closeModal('webhookModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="webhook-url-display">
+                <label class="form-label">您的 Webhook URL</label>
+                <div class="webhook-url-box">
+                    <code id="myWebhookUrl">https://tvtrade.io/webhook/--</code>
+                    <button class="copy-btn" onclick="copyMyWebhookUrl()">复制</button>
+                </div>
+                <p class="form-hint">将此URL填入TradingView警报的Webhook URL字段</p>
+            </div>
+            <div class="webhook-test-section">
+                <label class="form-label">Webhook 状态</label>
+                <div class="webhook-status-box" id="webhookStatusBox">
+                    <span class="status-indicator disconnected" id="webhookIndicator"></span>
+                    <span id="webhookConnectionText">等待连接...</span>
+                </div>
+            </div>
+            <button class="btn-primary" style="width: 100%; margin-top: 1.5rem;" onclick="regenerateWebhook()">重新生成 Webhook URL</button>
+        </div>
+    </div>
+</div>
