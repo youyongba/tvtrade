@@ -488,10 +488,21 @@ function getSettings() {
     return { direction, orderType, leverage, positionSize, symbol };
 }
 
+// 获取用户 token (从 webhook URL 中提取)
+function getUserToken() {
+    if (webhookConfig && webhookConfig.url) {
+        const parts = webhookConfig.url.split('/');
+        return parts[parts.length - 1];
+    }
+    return null;
+}
+
 function updateAllWebhooks() {
     const settings = getSettings();
+    const userToken = getUserToken();
     
     const openWebhook = {
+        token: userToken,
         action: `open_${settings.direction}`,
         symbol: settings.symbol,
         leverage: parseInt(settings.leverage),
@@ -506,6 +517,7 @@ function updateAllWebhooks() {
     
     takeProfits.forEach((tp, index) => {
         const tpWebhook = {
+            token: userToken,
             action: "take_profit",
             symbol: settings.symbol,
             close_percent: `${tp.closePercent}%`,
@@ -526,6 +538,7 @@ function updateAllWebhooks() {
     
     stopLosses.forEach((sl, index) => {
         const slWebhook = {
+            token: userToken,
             action: "stop_loss",
             symbol: settings.symbol,
             close_percent: `${sl.closePercent}%`,
