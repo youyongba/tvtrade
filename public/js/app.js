@@ -501,7 +501,7 @@ async function saveExchangeConfig() {
     }
 
     try {
-        showToast('正在保存...', 'success');
+        showToast('正在保存并测试连接...', 'success');
 
         const result = await apiRequest('/exchanges', {
             method: 'POST',
@@ -514,14 +514,20 @@ async function saveExchangeConfig() {
             exchange: result.data.exchange,
             apiKey: result.data.apiKey,
             connected: result.data.connected,
-            balance: 0,
+            balance: result.data.balance || 0,
+            permissions: result.data.permissions || [],
             savedAt: new Date().toISOString()
         };
         localStorage.setItem('tvtrade_exchange', JSON.stringify(exchangeConfig));
 
         updateUIState();
         closeModal('exchangeModal');
-        showToast('交易所配置已保存', 'success');
+        
+        if (result.data.connected) {
+            showToast(`配置已保存并连接成功! 余额: $${result.data.balance.toLocaleString()}`, 'success');
+        } else {
+            showToast('配置已保存，但连接测试失败，请检查 API 配置', 'error');
+        }
 
     } catch (error) {
         showToast(error.message || '保存失败', 'error');
@@ -675,6 +681,12 @@ function updateExchangeModalUI() {
     const balanceText = document.getElementById('exchangeBalanceText');
     const deleteBtn = document.getElementById('deleteExchangeBtn');
     
+    // 清空敏感输入框（apiSecret 和 passphrase 不存储，每次打开都需要重新输入）
+    const apiSecretInput = document.getElementById('apiSecret');
+    const apiPassphraseInput = document.getElementById('apiPassphrase');
+    if (apiSecretInput) apiSecretInput.value = '';
+    if (apiPassphraseInput) apiPassphraseInput.value = '';
+    
     if (exchangeConfig && exchangeConfig.connected) {
         const exchangeNames = {
             'binance': 'Binance Futures',
@@ -689,8 +701,9 @@ function updateExchangeModalUI() {
         balanceText.textContent = exchangeConfig.balance ? `$${exchangeConfig.balance.toLocaleString()}` : '';
         deleteBtn.style.display = 'block';
         
-        // 填充表单
+        // 填充表单 - 只填充交易所类型和脱敏后的 API Key
         document.getElementById('exchangeSelect').value = exchangeConfig.exchange;
+        document.getElementById('apiKey').value = exchangeConfig.apiKey || '';
     } else if (exchangeConfig && exchangeConfig.id) {
         connectionStatus.style.display = 'block';
         statusDot.style.background = 'var(--text-muted)';
@@ -699,9 +712,12 @@ function updateExchangeModalUI() {
         deleteBtn.style.display = 'block';
         
         document.getElementById('exchangeSelect').value = exchangeConfig.exchange;
+        document.getElementById('apiKey').value = exchangeConfig.apiKey || '';
     } else {
         connectionStatus.style.display = 'none';
         deleteBtn.style.display = 'none';
+        // 无配置时清空所有字段
+        document.getElementById('apiKey').value = '';
     }
     
     // 触发交易所选择变化
@@ -801,9 +817,11 @@ function updateUIState() {
         balanceDisplay.style.color = 'var(--accent-gold)';
         
         document.getElementById('exchangeSelect').value = exchangeConfig.exchange;
-        document.getElementById('apiKey').value = exchangeConfig.apiKey;
-        document.getElementById('apiSecret').value = exchangeConfig.apiSecret;
-        document.getElementById('apiPassphrase').value = exchangeConfig.passphrase || '';
+        // 只填充 apiKey（脱敏后的），不覆盖 apiSecret 和 passphrase（敏感信息不保存）
+        const apiKeyInput = document.getElementById('apiKey');
+        if (apiKeyInput && !apiKeyInput.value) {
+            apiKeyInput.value = exchangeConfig.apiKey || '';
+        }
     } else {
         exchangeStatus.textContent = '交易所: 未连接';
         balanceDisplay.textContent = '余额: --';

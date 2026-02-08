@@ -1,177 +1,312 @@
-const ccxt = require('ccxt');
+const crypto = require('crypto');
 const https = require('https');
-const http = require('http');
+const { URL } = require('url');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 
 // 交易所配置映射
 const EXCHANGE_CONFIG = {
   binance: {
-    className: 'binanceusdm', // Binance USDT-M Futures
-    name: 'Binance Futures'
+    name: 'Binance Futures',
+    baseUrl: 'https://fapi.binance.com',
+    balanceEndpoint: '/fapi/v2/balance'
   },
   okx: {
-    className: 'okx',
-    name: 'OKX'
+    name: 'OKX',
+    baseUrl: 'https://www.okx.com',
+    balanceEndpoint: '/api/v5/account/balance'
   },
   bybit: {
-    className: 'bybit',
-    name: 'Bybit'
+    name: 'Bybit',
+    baseUrl: 'https://api.bybit.com',
+    balanceEndpoint: '/v5/account/wallet-balance'
   },
   bitget: {
-    className: 'bitget',
-    name: 'Bitget'
+    name: 'Bitget',
+    baseUrl: 'https://api.bitget.com',
+    balanceEndpoint: '/api/v2/mix/account/accounts'
   }
 };
 
-// 创建代理 agent
-function createProxyAgent() {
-  // 支持多种代理环境变量格式（大小写都支持）
-  const proxyUrl = process.env.PROXY_URL 
-    || process.env.https_proxy 
-    || process.env.HTTPS_PROXY 
-    || process.env.http_proxy 
-    || process.env.HTTP_PROXY;
-  
-  if (!proxyUrl) {
-    console.log('No proxy configured. Set PROXY_URL or https_proxy in environment.');
-    return null;
-  }
-  
-  console.log('Using proxy:', proxyUrl);
-  
-  try {
-    const { HttpsProxyAgent } = require('https-proxy-agent');
+// 获取代理 agent
+function getProxyAgent() {
+  const proxyUrl = process.env.PROXY_URL || process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY;
+  if (proxyUrl) {
+    console.log('Using proxy:', proxyUrl);
     return new HttpsProxyAgent(proxyUrl);
-  } catch (e) {
-    console.log('Proxy agent error:', e.message);
-    return null;
   }
+  return null;
+}
+
+// 发起 HTTPS 请求
+function httpsRequest(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const targetUrl = new URL(url);
+    const agent = getProxyAgent();
+    
+    const req = https.request({
+      hostname: targetUrl.hostname,
+      port: 443,
+      path: targetUrl.pathname + targetUrl.search,
+      method: options.method || 'GET',
+      headers: options.headers || {},
+      agent: agent,
+      timeout: 30000
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(new Error(`Invalid JSON: ${data.slice(0, 100)}`));
+        }
+      });
+    });
+    
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+    
+    req.end();
+  });
+}
+
+// 生成 HMAC 签名
+function createSignature(queryString, secret) {
+  return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
 }
 
 /**
- * 创建交易所客户端
- * @param {string} exchangeId - 交易所 ID
- * @param {string} apiKey - API Key
- * @param {string} apiSecret - API Secret
- * @param {string} passphrase - Passphrase (可选)
- * @returns {ccxt.Exchange} 交易所实例
+ * 获取 Binance 服务器时间
  */
-function createExchangeClient(exchangeId, apiKey, apiSecret, passphrase = '') {
-  const config = EXCHANGE_CONFIG[exchangeId];
-  if (!config) {
-    throw new Error(`不支持的交易所: ${exchangeId}`);
-  }
+async function getBinanceServerTime() {
+  const data = await httpsRequest('https://fapi.binance.com/fapi/v1/time', {
+    method: 'GET'
+  });
+  return data.serverTime;
+}
 
-  const ExchangeClass = ccxt[config.className];
-  if (!ExchangeClass) {
-    throw new Error(`交易所类不存在: ${config.className}`);
-  }
-
-  const agent = createProxyAgent();
+/**
+ * 测试 Binance Futures 连接
+ */
+async function testBinanceConnection(apiKey, apiSecret) {
+  const config = EXCHANGE_CONFIG.binance;
   
-  const options = {
-    apiKey,
-    secret: apiSecret,
-    enableRateLimit: true,
-    timeout: 30000, // 30秒超时
-    options: {
-      defaultType: 'swap', // 默认使用永续合约
-      adjustForTimeDifference: true
+  // 获取服务器时间以避免时间戳问题
+  const serverTime = await getBinanceServerTime();
+  console.log(`Server time: ${serverTime}, Local time: ${Date.now()}, Diff: ${Date.now() - serverTime}ms`);
+  
+  const queryString = `timestamp=${serverTime}&recvWindow=60000`;
+  const signature = createSignature(queryString, apiSecret);
+  
+  const url = `${config.baseUrl}${config.balanceEndpoint}?${queryString}&signature=${signature}`;
+  
+  const data = await httpsRequest(url, {
+    method: 'GET',
+    headers: {
+      'X-MBX-APIKEY': apiKey
     }
-  };
-
-  // 设置代理 (ccxt 使用 httpAgent/httpsAgent)
-  if (agent) {
-    options.httpAgent = agent;
-    options.httpsAgent = agent;
-  }
-
-  // OKX 和 Bitget 需要 passphrase
-  if (['okx', 'bitget'].includes(exchangeId) && passphrase) {
-    options.password = passphrase;
-  }
-
-  // Binance Futures 特殊配置
-  if (exchangeId === 'binance') {
-    options.options = {
-      ...options.options,
-      defaultType: 'future',
-      adjustForTimeDifference: true,
-      recvWindow: 60000
-    };
-  }
-
-  // Bybit 特殊配置
-  if (exchangeId === 'bybit') {
-    options.options.defaultType = 'linear'; // USDT 永续
-  }
-
-  const client = new ExchangeClass(options);
+  });
   
-  return client;
+  if (data.code) {
+    throw new Error(data.msg || `Error code: ${data.code}`);
+  }
+  
+  // 计算 USDT 余额
+  let balance = 0;
+  if (Array.isArray(data)) {
+    const usdtAsset = data.find(a => a.asset === 'USDT');
+    if (usdtAsset) {
+      balance = parseFloat(usdtAsset.balance || usdtAsset.availableBalance || 0);
+    }
+  }
+  
+  return {
+    success: true,
+    balance: parseFloat(balance.toFixed(2)),
+    permissions: ['futures']
+  };
+}
+
+/**
+ * 测试 OKX 连接
+ */
+async function testOkxConnection(apiKey, apiSecret, passphrase) {
+  const config = EXCHANGE_CONFIG.okx;
+  const timestamp = new Date().toISOString();
+  const method = 'GET';
+  const requestPath = '/api/v5/account/balance';
+  
+  const preHash = timestamp + method + requestPath;
+  const signature = crypto.createHmac('sha256', apiSecret).update(preHash).digest('base64');
+  
+  const url = `${config.baseUrl}${requestPath}`;
+  
+  const data = await httpsRequest(url, {
+    method: 'GET',
+    headers: {
+      'OK-ACCESS-KEY': apiKey,
+      'OK-ACCESS-SIGN': signature,
+      'OK-ACCESS-TIMESTAMP': timestamp,
+      'OK-ACCESS-PASSPHRASE': passphrase,
+      'Content-Type': 'application/json'
+    }
+  });
+  
+  if (data.code !== '0') {
+    throw new Error(data.msg || `Error code: ${data.code}`);
+  }
+  
+  // 计算 USDT 余额
+  let balance = 0;
+  if (data.data && data.data[0] && data.data[0].details) {
+    const usdtAsset = data.data[0].details.find(a => a.ccy === 'USDT');
+    if (usdtAsset) {
+      balance = parseFloat(usdtAsset.availBal || usdtAsset.cashBal || 0);
+    }
+  }
+  
+  return {
+    success: true,
+    balance: parseFloat(balance.toFixed(2)),
+    permissions: ['futures']
+  };
+}
+
+/**
+ * 测试 Bybit 连接
+ */
+async function testBybitConnection(apiKey, apiSecret) {
+  const config = EXCHANGE_CONFIG.bybit;
+  const timestamp = Date.now();
+  const recvWindow = 60000;
+  const queryString = `accountType=UNIFIED`;
+  
+  const preHash = `${timestamp}${apiKey}${recvWindow}${queryString}`;
+  const signature = crypto.createHmac('sha256', apiSecret).update(preHash).digest('hex');
+  
+  const url = `${config.baseUrl}${config.balanceEndpoint}?${queryString}`;
+  
+  const data = await httpsRequest(url, {
+    method: 'GET',
+    headers: {
+      'X-BAPI-API-KEY': apiKey,
+      'X-BAPI-SIGN': signature,
+      'X-BAPI-TIMESTAMP': timestamp.toString(),
+      'X-BAPI-RECV-WINDOW': recvWindow.toString()
+    }
+  });
+  
+  if (data.retCode !== 0) {
+    throw new Error(data.retMsg || `Error code: ${data.retCode}`);
+  }
+  
+  // 计算 USDT 余额
+  let balance = 0;
+  if (data.result && data.result.list && data.result.list[0]) {
+    const coins = data.result.list[0].coin || [];
+    const usdtAsset = coins.find(c => c.coin === 'USDT');
+    if (usdtAsset) {
+      balance = parseFloat(usdtAsset.walletBalance || usdtAsset.availableToWithdraw || 0);
+    }
+  }
+  
+  return {
+    success: true,
+    balance: parseFloat(balance.toFixed(2)),
+    permissions: ['futures']
+  };
+}
+
+/**
+ * 测试 Bitget 连接
+ */
+async function testBitgetConnection(apiKey, apiSecret, passphrase) {
+  const config = EXCHANGE_CONFIG.bitget;
+  const timestamp = Date.now();
+  const method = 'GET';
+  const requestPath = '/api/v2/mix/account/accounts?productType=USDT-FUTURES';
+  
+  const preHash = `${timestamp}${method}${requestPath}`;
+  const signature = crypto.createHmac('sha256', apiSecret).update(preHash).digest('base64');
+  
+  const url = `${config.baseUrl}${requestPath}`;
+  
+  const data = await httpsRequest(url, {
+    method: 'GET',
+    headers: {
+      'ACCESS-KEY': apiKey,
+      'ACCESS-SIGN': signature,
+      'ACCESS-TIMESTAMP': timestamp.toString(),
+      'ACCESS-PASSPHRASE': passphrase,
+      'Content-Type': 'application/json',
+      'locale': 'en-US'
+    }
+  });
+  
+  if (data.code !== '00000') {
+    throw new Error(data.msg || `Error code: ${data.code}`);
+  }
+  
+  // 计算 USDT 余额
+  let balance = 0;
+  if (data.data && data.data[0]) {
+    balance = parseFloat(data.data[0].usdtEquity || data.data[0].available || 0);
+  }
+  
+  return {
+    success: true,
+    balance: parseFloat(balance.toFixed(2)),
+    permissions: ['futures']
+  };
 }
 
 /**
  * 测试交易所连接并获取余额
- * @param {string} exchangeId - 交易所 ID
- * @param {string} apiKey - API Key
- * @param {string} apiSecret - API Secret
- * @param {string} passphrase - Passphrase
- * @returns {Promise<{success: boolean, balance?: number, permissions?: string[], message?: string}>}
  */
 async function testExchangeConnection(exchangeId, apiKey, apiSecret, passphrase = '') {
   try {
-    const client = createExchangeClient(exchangeId, apiKey, apiSecret, passphrase);
-
-    // 获取账户余额
-    const balance = await client.fetchBalance();
-
-    // 计算 USDT 总余额（永续合约账户）
-    let totalBalance = 0;
+    console.log(`Testing ${exchangeId} connection...`);
     
-    // 不同交易所的余额结构不同
-    if (balance.USDT) {
-      // 优先使用 total（总余额 = 可用 + 冻结）
-      totalBalance = parseFloat(balance.USDT.total || balance.USDT.free || 0);
-    } else if (balance.total && balance.total.USDT) {
-      totalBalance = parseFloat(balance.total.USDT);
+    switch (exchangeId) {
+      case 'binance':
+        return await testBinanceConnection(apiKey, apiSecret);
+      case 'okx':
+        return await testOkxConnection(apiKey, apiSecret, passphrase);
+      case 'bybit':
+        return await testBybitConnection(apiKey, apiSecret);
+      case 'bitget':
+        return await testBitgetConnection(apiKey, apiSecret, passphrase);
+      default:
+        throw new Error(`不支持的交易所: ${exchangeId}`);
     }
-
-    // 尝试获取权限信息（部分交易所支持）
-    const permissions = ['futures'];
-
-    return {
-      success: true,
-      balance: parseFloat(totalBalance.toFixed(2)),
-      permissions
-    };
-
   } catch (error) {
     console.error('Exchange connection error:', error.message);
-
+    
     // 解析错误信息
     let message = 'API 连接失败';
     const errMsg = error.message || '';
     
-    if (errMsg.includes('timed out') || errMsg.includes('timeout') || errMsg.includes('ETIMEDOUT')) {
-      message = '连接超时，请检查网络或稍后重试';
+    if (errMsg.includes('timeout') || errMsg.includes('ETIMEDOUT') || errMsg.includes('ECONNRESET')) {
+      message = '连接超时，请检查网络';
     } else if (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND')) {
-      message = '无法连接到交易所服务器，请检查网络';
-    } else if (errMsg.includes('Invalid API') || errMsg.includes('invalid api')) {
-      message = 'API Key 无效';
+      message = '无法连接到交易所服务器';
+    } else if (errMsg.includes('Invalid API') || errMsg.includes('-2015') || errMsg.includes('-1022')) {
+      message = 'API Key 或 Secret 无效';
     } else if (errMsg.includes('Signature') || errMsg.includes('signature')) {
       message = 'API Secret 错误';
     } else if (errMsg.includes('IP') || errMsg.includes('whitelist')) {
-      message = 'IP 地址未在白名单中';
+      message = 'IP 未在白名单';
     } else if (errMsg.includes('permission') || errMsg.includes('Permission')) {
-      message = 'API 权限不足，请开启合约交易权限';
-    } else if (errMsg.includes('timestamp') && !errMsg.includes('timed')) {
-      message = '时间戳错误，请检查服务器时间';
+      message = 'API 权限不足';
     } else if (errMsg.includes('passphrase') || errMsg.includes('Passphrase')) {
       message = 'Passphrase 错误';
     } else if (errMsg) {
-      message = errMsg.slice(0, 100); // 截取前100个字符
+      message = errMsg.slice(0, 100);
     }
-
+    
     return {
       success: false,
       message
@@ -181,11 +316,6 @@ async function testExchangeConnection(exchangeId, apiKey, apiSecret, passphrase 
 
 /**
  * 获取账户余额
- * @param {string} exchangeId - 交易所 ID
- * @param {string} apiKey - API Key
- * @param {string} apiSecret - API Secret
- * @param {string} passphrase - Passphrase
- * @returns {Promise<number>}
  */
 async function getBalance(exchangeId, apiKey, apiSecret, passphrase = '') {
   const result = await testExchangeConnection(exchangeId, apiKey, apiSecret, passphrase);
@@ -193,7 +323,6 @@ async function getBalance(exchangeId, apiKey, apiSecret, passphrase = '') {
 }
 
 module.exports = {
-  createExchangeClient,
   testExchangeConnection,
   getBalance,
   EXCHANGE_CONFIG

@@ -105,6 +105,29 @@ exports.saveExchangeConfig = async (req, res) => {
       });
     }
 
+    // 保存前先测试连接
+    let connected = false;
+    let balance = 0;
+    let permissions = [];
+
+    try {
+      console.log(`Testing connection to ${exchange} before saving...`);
+      const testResult = await testExchangeConnection(exchange, apiKey, apiSecret, passphrase);
+      // testExchangeConnection 返回 success 字段表示连接状态
+      connected = testResult.success === true;
+      balance = testResult.balance || 0;
+      permissions = testResult.permissions || [];
+      console.log(`Connection test result: connected=${connected}, balance=${balance}`);
+      
+      if (!connected && testResult.message) {
+        console.log(`Connection failed: ${testResult.message}`);
+      }
+    } catch (testError) {
+      console.error('Connection test failed during save:', testError.message);
+      // 连接测试失败，但仍然保存配置（用户可以稍后重新测试）
+      connected = false;
+    }
+
     // 查找或创建配置
     let exchangeConfig = await Exchange.findOne({ user: req.user.id });
 
@@ -114,7 +137,10 @@ exports.saveExchangeConfig = async (req, res) => {
       exchangeConfig.apiKey = apiKey;
       exchangeConfig.apiSecret = apiSecret;
       exchangeConfig.passphrase = passphrase || '';
-      exchangeConfig.connected = false; // 更新后需要重新测试连接
+      exchangeConfig.connected = connected;
+      exchangeConfig.balance = balance;
+      exchangeConfig.permissions = permissions;
+      exchangeConfig.lastConnectedAt = connected ? new Date() : exchangeConfig.lastConnectedAt;
       await exchangeConfig.save();
     } else {
       // 创建新配置
@@ -123,7 +149,11 @@ exports.saveExchangeConfig = async (req, res) => {
         exchange,
         apiKey,
         apiSecret,
-        passphrase: passphrase || ''
+        passphrase: passphrase || '',
+        connected,
+        balance,
+        permissions,
+        lastConnectedAt: connected ? new Date() : undefined
       });
     }
 
@@ -134,6 +164,8 @@ exports.saveExchangeConfig = async (req, res) => {
         exchange: exchangeConfig.exchange,
         apiKey: exchangeConfig.getMaskedApiKey(),
         connected: exchangeConfig.connected,
+        balance: exchangeConfig.balance,
+        permissions: exchangeConfig.permissions,
         createdAt: exchangeConfig.createdAt
       }
     });

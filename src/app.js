@@ -1,11 +1,11 @@
 require('dotenv').config();
 
-// 配置全局代理（必须在其他模块加载之前）
+// 配置全局代理
 const proxyUrl = process.env.PROXY_URL || process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY;
 if (proxyUrl) {
-  process.env.GLOBAL_AGENT_HTTP_PROXY = proxyUrl;
-  process.env.GLOBAL_AGENT_HTTPS_PROXY = proxyUrl;
-  require('global-agent/bootstrap');
+  const { setGlobalDispatcher, ProxyAgent } = require('undici');
+  const proxyAgent = new ProxyAgent(proxyUrl);
+  setGlobalDispatcher(proxyAgent);
   console.log('Global proxy enabled:', proxyUrl);
 }
 
