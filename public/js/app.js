@@ -40,11 +40,78 @@ async function apiRequest(endpoint, options = {}) {
 
 // 弹窗控制
 function openModal(modalId) {
+    // 打开登录弹窗时，重置到登录表单
+    if (modalId === 'loginModal') {
+        resetAuthModal();
+    }
+    // 打开交易所弹窗时，更新 UI
+    if (modalId === 'exchangeModal') {
+        updateExchangeModalUI();
+    }
     document.getElementById(modalId).classList.add('active');
 }
 
 function closeModal(modalId) {
     document.getElementById(modalId).classList.remove('active');
+    
+    // 关闭登录弹窗时，重置到登录表单
+    if (modalId === 'loginModal') {
+        resetAuthModal();
+    }
+}
+
+// 重置登录弹窗到初始状态
+function resetAuthModal() {
+    // 重置到登录表单
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const forgotForm = document.getElementById('forgotForm');
+    const resetForm = document.getElementById('resetForm');
+    const authTabs = document.getElementById('authTabs');
+    const authModalTitle = document.getElementById('authModalTitle');
+    
+    if (loginForm) loginForm.style.display = 'block';
+    if (registerForm) registerForm.style.display = 'none';
+    if (forgotForm) forgotForm.style.display = 'none';
+    if (resetForm) resetForm.style.display = 'none';
+    if (authTabs) authTabs.style.display = 'flex';
+    if (authModalTitle) authModalTitle.textContent = '🔐 用户登录';
+    
+    // 重置标签状态
+    document.querySelectorAll('.modal-tab').forEach((t, i) => {
+        t.classList.toggle('active', i === 0);
+    });
+    
+    // 清空表单输入
+    const inputs = ['loginEmail', 'loginPassword', 'regUsername', 'regEmail', 'regPassword', 'regConfirmPassword', 'forgotEmail', 'resetPassword', 'resetConfirmPassword'];
+    inputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    
+    // 恢复找回密码表单（如果被修改过）
+    restoreForgotForm();
+    
+    // 恢复重置密码表单
+    if (resetForm) {
+        resetForm.innerHTML = `
+            <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1rem;">
+                请设置您的新密码。
+            </p>
+            <div class="form-group">
+                <label class="form-label">新密码</label>
+                <input type="password" class="form-input" id="resetPassword" placeholder="请输入新密码 (至少6位)">
+            </div>
+            <div class="form-group">
+                <label class="form-label">确认新密码</label>
+                <input type="password" class="form-input" id="resetConfirmPassword" placeholder="请再次输入新密码">
+            </div>
+            <button class="btn-primary" style="width: 100%; margin-top: 1rem;" onclick="handleResetPassword()">重置密码</button>
+        `;
+    }
+    
+    // 清除重置 token
+    resetPasswordToken = null;
 }
 
 // 点击弹窗外部关闭
@@ -52,21 +119,58 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', function(e) {
         if (e.target === this) {
             this.classList.remove('active');
+            // 如果是登录弹窗，重置到初始状态
+            if (this.id === 'loginModal') {
+                resetAuthModal();
+            }
         }
     });
 });
 
-// 切换登录/注册标签
+// 密码重置 token（用于重置密码流程）
+let resetPasswordToken = null;
+
+// 切换登录/注册/找回密码标签
 function switchAuthTab(tab) {
-    document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
-    event.target.classList.add('active');
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const forgotForm = document.getElementById('forgotForm');
+    const resetForm = document.getElementById('resetForm');
+    const authTabs = document.getElementById('authTabs');
+    const authModalTitle = document.getElementById('authModalTitle');
     
-    if (tab === 'login') {
-        document.getElementById('loginForm').style.display = 'block';
-        document.getElementById('registerForm').style.display = 'none';
-    } else {
-        document.getElementById('loginForm').style.display = 'none';
-        document.getElementById('registerForm').style.display = 'block';
+    // 隐藏所有表单
+    loginForm.style.display = 'none';
+    registerForm.style.display = 'none';
+    forgotForm.style.display = 'none';
+    resetForm.style.display = 'none';
+    
+    // 重置标签状态
+    document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+    
+    switch(tab) {
+        case 'login':
+            loginForm.style.display = 'block';
+            authTabs.style.display = 'flex';
+            authModalTitle.textContent = '🔐 用户登录';
+            document.querySelector('.modal-tab:first-child').classList.add('active');
+            break;
+        case 'register':
+            registerForm.style.display = 'block';
+            authTabs.style.display = 'flex';
+            authModalTitle.textContent = '🔐 用户注册';
+            document.querySelector('.modal-tab:last-child').classList.add('active');
+            break;
+        case 'forgot':
+            forgotForm.style.display = 'block';
+            authTabs.style.display = 'none';
+            authModalTitle.textContent = '🔑 找回密码';
+            break;
+        case 'reset':
+            resetForm.style.display = 'block';
+            authTabs.style.display = 'none';
+            authModalTitle.textContent = '🔑 重置密码';
+            break;
     }
 }
 
@@ -93,8 +197,9 @@ async function handleLogin() {
         localStorage.setItem('tvtrade_user', JSON.stringify(currentUser));
         localStorage.setItem('tvtrade_token', authToken);
 
-        // 获取webhook信息（从用户注册时返回的webhook信息加载）
+        // 获取用户配置
         await loadUserWebhook();
+        await loadExchangeConfig();
 
         updateUIState();
         closeModal('loginModal');
@@ -208,6 +313,144 @@ async function handleLogout() {
     showToast('已退出登录', 'success');
 }
 
+// 找回密码处理
+async function handleForgotPassword() {
+    const emailInput = document.getElementById('forgotEmail');
+    const email = emailInput ? emailInput.value : '';
+
+    if (!email) {
+        showToast('请填写邮箱地址', 'error');
+        return;
+    }
+
+    // 验证邮箱格式
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(email)) {
+        showToast('请输入有效的邮箱地址', 'error');
+        return;
+    }
+
+    try {
+        showToast('正在发送...', 'success');
+        
+        const result = await apiRequest('/auth/forgot-password', {
+            method: 'POST',
+            body: JSON.stringify({ email })
+        });
+
+        // 显示邮件已发送的消息
+        showEmailSentMessage(email);
+        showToast('重置链接已发送到您的邮箱', 'success');
+
+    } catch (error) {
+        showToast(error.message || '发送失败，请稍后重试', 'error');
+    }
+}
+
+// 显示邮件已发送消息
+function showEmailSentMessage(email) {
+    const forgotForm = document.getElementById('forgotForm');
+    forgotForm.innerHTML = `
+        <div style="text-align: center;">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">📧</div>
+            <p style="color: var(--text-primary); margin-bottom: 0.5rem; font-size: 1.1rem;">邮件已发送!</p>
+            <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.5rem;">
+                密码重置链接已发送到<br><strong style="color: var(--accent-cyan);">${email}</strong>
+            </p>
+            <div style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; text-align: left;">
+                <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.5rem;">📌 提示：</p>
+                <ul style="color: var(--text-muted); font-size: 0.8rem; margin: 0; padding-left: 1.2rem;">
+                    <li>请检查您的邮箱收件箱</li>
+                    <li>如未收到，请检查垃圾邮件</li>
+                    <li>链接有效期为 10 分钟</li>
+                </ul>
+            </div>
+            <button class="btn-primary" style="width: 100%; margin-bottom: 1rem;" onclick="restoreForgotForm();">
+                重新发送
+            </button>
+            <a href="#" onclick="restoreForgotForm(); switchAuthTab('login'); return false;" 
+               style="color: var(--text-muted); font-size: 0.875rem; text-decoration: none;">
+                ← 返回登录
+            </a>
+        </div>
+    `;
+}
+
+// 恢复找回密码表单
+function restoreForgotForm() {
+    const forgotForm = document.getElementById('forgotForm');
+    forgotForm.innerHTML = `
+        <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1rem;">
+            请输入您的注册邮箱，我们将发送密码重置链接。
+        </p>
+        <div class="form-group">
+            <label class="form-label">邮箱</label>
+            <input type="email" class="form-input" id="forgotEmail" placeholder="请输入注册邮箱">
+        </div>
+        <button class="btn-primary" style="width: 100%; margin-top: 1rem;" onclick="handleForgotPassword()">发送重置链接</button>
+        <div style="text-align: center; margin-top: 1rem;">
+            <a href="#" onclick="switchAuthTab('login'); return false;" style="color: var(--accent-cyan); font-size: 0.875rem; text-decoration: none;">← 返回登录</a>
+        </div>
+    `;
+}
+
+
+// 重置密码处理
+async function handleResetPassword() {
+    const password = document.getElementById('resetPassword').value;
+    const confirmPassword = document.getElementById('resetConfirmPassword').value;
+
+    if (!password) {
+        showToast('请填写新密码', 'error');
+        return;
+    }
+
+    if (password.length < 6) {
+        showToast('密码至少需要6个字符', 'error');
+        return;
+    }
+
+    if (password !== confirmPassword) {
+        showToast('两次输入的密码不一致', 'error');
+        return;
+    }
+
+    if (!resetPasswordToken) {
+        showToast('重置链接无效，请重新申请', 'error');
+        switchAuthTab('forgot');
+        return;
+    }
+
+    try {
+        const result = await apiRequest(`/auth/reset-password/${resetPasswordToken}`, {
+            method: 'POST',
+            body: JSON.stringify({ password, confirmPassword })
+        });
+
+        // 重置成功，自动登录
+        currentUser = result.data.user;
+        authToken = result.data.token;
+        
+        localStorage.setItem('tvtrade_user', JSON.stringify(currentUser));
+        localStorage.setItem('tvtrade_token', authToken);
+
+        // 清除重置 token
+        resetPasswordToken = null;
+        
+        // 清空表单
+        document.getElementById('resetPassword').value = '';
+        document.getElementById('resetConfirmPassword').value = '';
+
+        await loadUserWebhook();
+        updateUIState();
+        closeModal('loginModal');
+        showToast('密码重置成功！', 'success');
+
+    } catch (error) {
+        showToast(error.message || '重置失败，请稍后重试', 'error');
+    }
+}
+
 // 验证并刷新用户状态
 async function validateSession() {
     if (!authToken) return;
@@ -241,7 +484,12 @@ function togglePasswordVisibility(inputId) {
 }
 
 // 保存交易所配置
-function saveExchangeConfig() {
+async function saveExchangeConfig() {
+    if (!currentUser) {
+        showToast('请先登录', 'error');
+        return;
+    }
+
     const exchange = document.getElementById('exchangeSelect').value;
     const apiKey = document.getElementById('apiKey').value;
     const apiSecret = document.getElementById('apiSecret').value;
@@ -252,37 +500,212 @@ function saveExchangeConfig() {
         return;
     }
 
-    exchangeConfig = {
-        exchange: exchange,
-        apiKey: apiKey,
-        apiSecret: apiSecret,
-        passphrase: passphrase,
-        connected: true,
-        balance: 12450.00,
-        savedAt: new Date().toISOString()
-    };
+    try {
+        showToast('正在保存...', 'success');
 
-    localStorage.setItem('tvtrade_exchange', JSON.stringify(exchangeConfig));
-    updateUIState();
-    closeModal('exchangeModal');
-    showToast('交易所配置已保存', 'success');
+        const result = await apiRequest('/exchanges', {
+            method: 'POST',
+            body: JSON.stringify({ exchange, apiKey, apiSecret, passphrase })
+        });
+
+        // 更新本地状态
+        exchangeConfig = {
+            id: result.data.id,
+            exchange: result.data.exchange,
+            apiKey: result.data.apiKey,
+            connected: result.data.connected,
+            balance: 0,
+            savedAt: new Date().toISOString()
+        };
+        localStorage.setItem('tvtrade_exchange', JSON.stringify(exchangeConfig));
+
+        updateUIState();
+        closeModal('exchangeModal');
+        showToast('交易所配置已保存', 'success');
+
+    } catch (error) {
+        showToast(error.message || '保存失败', 'error');
+    }
 }
 
 // 测试API连接
-function testApiConnection() {
+async function testApiConnection() {
+    if (!currentUser) {
+        showToast('请先登录', 'error');
+        return;
+    }
+
+    const exchange = document.getElementById('exchangeSelect').value;
     const apiKey = document.getElementById('apiKey').value;
     const apiSecret = document.getElementById('apiSecret').value;
+    const passphrase = document.getElementById('apiPassphrase').value;
 
     if (!apiKey || !apiSecret) {
         showToast('请先填写 API Key 和 Secret', 'error');
         return;
     }
 
-    showToast('正在测试连接...', 'success');
+    try {
+        showToast('正在测试连接...', 'success');
+
+        const result = await apiRequest('/exchanges/test', {
+            method: 'POST',
+            body: JSON.stringify({ exchange, apiKey, apiSecret, passphrase })
+        });
+
+        if (result.success && result.data.connected) {
+            // 更新本地状态（保留当前表单的值，不覆盖）
+            exchangeConfig = {
+                id: exchangeConfig?.id,
+                exchange: exchange,
+                apiKey: apiKey, // 保留完整的 apiKey 用于表单显示
+                connected: true,
+                balance: result.data.balance,
+                permissions: result.data.permissions
+            };
+            localStorage.setItem('tvtrade_exchange', JSON.stringify(exchangeConfig));
+
+            // 更新弹窗中的连接状态显示
+            const connectionStatus = document.getElementById('exchangeConnectionStatus');
+            const statusDot = document.getElementById('exchangeStatusDot');
+            const statusText = document.getElementById('exchangeStatusText');
+            const balanceText = document.getElementById('exchangeBalanceText');
+            
+            const exchangeNames = {
+                'binance': 'Binance Futures',
+                'okx': 'OKX',
+                'bybit': 'Bybit',
+                'bitget': 'Bitget'
+            };
+            
+            connectionStatus.style.display = 'block';
+            statusDot.style.background = 'var(--success)';
+            statusText.textContent = `${exchangeNames[exchange]} 已连接`;
+            balanceText.textContent = `$${result.data.balance.toLocaleString()}`;
+
+            updateUIState();
+            showToast(`连接成功! 余额: $${result.data.balance.toLocaleString()}`, 'success');
+        }
+
+    } catch (error) {
+        showToast(error.message || 'API 连接测试失败', 'error');
+    }
+}
+
+// 加载交易所配置
+async function loadExchangeConfig() {
+    if (!authToken) return;
+
+    try {
+        const result = await apiRequest('/exchanges');
+        
+        if (result.success && result.data) {
+            exchangeConfig = {
+                id: result.data.id,
+                exchange: result.data.exchange,
+                apiKey: result.data.apiKey,
+                connected: result.data.connected,
+                balance: result.data.balance || 0,
+                permissions: result.data.permissions
+            };
+            localStorage.setItem('tvtrade_exchange', JSON.stringify(exchangeConfig));
+            updateUIState();
+        }
+    } catch (error) {
+        console.error('加载交易所配置失败:', error);
+    }
+}
+
+// 删除交易所配置
+async function deleteExchangeConfig() {
+    if (!exchangeConfig || !exchangeConfig.id) {
+        showToast('没有可删除的配置', 'error');
+        return;
+    }
+
+    if (!confirm('确定要删除交易所配置吗？')) {
+        return;
+    }
+
+    try {
+        await apiRequest(`/exchanges/${exchangeConfig.id}`, {
+            method: 'DELETE'
+        });
+
+        exchangeConfig = null;
+        localStorage.removeItem('tvtrade_exchange');
+        
+        // 清空表单
+        document.getElementById('apiKey').value = '';
+        document.getElementById('apiSecret').value = '';
+        document.getElementById('apiPassphrase').value = '';
+
+        updateExchangeModalUI();
+        updateUIState();
+        showToast('交易所配置已删除', 'success');
+
+    } catch (error) {
+        showToast(error.message || '删除失败', 'error');
+    }
+}
+
+// 交易所列表（需要 passphrase 的交易所）
+const EXCHANGES_REQUIRING_PASSPHRASE = ['okx', 'bitget'];
+
+// 交易所选择变化时
+function onExchangeChange() {
+    const exchange = document.getElementById('exchangeSelect').value;
+    const passphraseRequired = document.getElementById('passphraseRequired');
+    const passphraseInput = document.getElementById('apiPassphrase');
     
-    setTimeout(() => {
-        showToast('API连接测试成功!', 'success');
-    }, 1500);
+    if (EXCHANGES_REQUIRING_PASSPHRASE.includes(exchange)) {
+        passphraseRequired.style.display = 'inline';
+        passphraseInput.placeholder = '必填，请输入 Passphrase';
+    } else {
+        passphraseRequired.style.display = 'none';
+        passphraseInput.placeholder = '可选';
+    }
+}
+
+// 更新交易所弹窗 UI
+function updateExchangeModalUI() {
+    const connectionStatus = document.getElementById('exchangeConnectionStatus');
+    const statusDot = document.getElementById('exchangeStatusDot');
+    const statusText = document.getElementById('exchangeStatusText');
+    const balanceText = document.getElementById('exchangeBalanceText');
+    const deleteBtn = document.getElementById('deleteExchangeBtn');
+    
+    if (exchangeConfig && exchangeConfig.connected) {
+        const exchangeNames = {
+            'binance': 'Binance Futures',
+            'okx': 'OKX',
+            'bybit': 'Bybit',
+            'bitget': 'Bitget'
+        };
+        
+        connectionStatus.style.display = 'block';
+        statusDot.style.background = 'var(--success)';
+        statusText.textContent = `${exchangeNames[exchangeConfig.exchange] || exchangeConfig.exchange} 已连接`;
+        balanceText.textContent = exchangeConfig.balance ? `$${exchangeConfig.balance.toLocaleString()}` : '';
+        deleteBtn.style.display = 'block';
+        
+        // 填充表单
+        document.getElementById('exchangeSelect').value = exchangeConfig.exchange;
+    } else if (exchangeConfig && exchangeConfig.id) {
+        connectionStatus.style.display = 'block';
+        statusDot.style.background = 'var(--text-muted)';
+        statusText.textContent = '未测试连接';
+        balanceText.textContent = '';
+        deleteBtn.style.display = 'block';
+        
+        document.getElementById('exchangeSelect').value = exchangeConfig.exchange;
+    } else {
+        connectionStatus.style.display = 'none';
+        deleteBtn.style.display = 'none';
+    }
+    
+    // 触发交易所选择变化
+    onExchangeChange();
 }
 
 // 复制Webhook URL
@@ -971,6 +1394,7 @@ document.getElementById('saveConfigBtn').addEventListener('click', saveCurrentCo
 validateSession().then(() => {
     if (currentUser && authToken) {
         loadUserWebhook();
+        loadExchangeConfig();
     }
 });
 

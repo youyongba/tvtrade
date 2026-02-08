@@ -5,9 +5,18 @@
             <button class="modal-close" onclick="closeModal('exchangeModal')">×</button>
         </div>
         <div class="modal-body">
+            <!-- 连接状态显示 -->
+            <div id="exchangeConnectionStatus" style="display: none; margin-bottom: 1rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 8px;">
+                    <span class="status-dot" id="exchangeStatusDot" style="background: var(--success);"></span>
+                    <span id="exchangeStatusText" style="flex: 1;">已连接</span>
+                    <span id="exchangeBalanceText" style="font-family: 'JetBrains Mono', monospace; color: var(--accent-gold);"></span>
+                </div>
+            </div>
+
             <div class="form-group">
                 <label class="form-label">选择交易所</label>
-                <select class="form-input" id="exchangeSelect">
+                <select class="form-input" id="exchangeSelect" onchange="onExchangeChange()">
                     <option value="binance">Binance Futures</option>
                     <option value="okx">OKX</option>
                     <option value="bybit">Bybit</option>
@@ -25,10 +34,10 @@
                     <button class="toggle-password" onclick="togglePasswordVisibility('apiSecret')">👁️</button>
                 </div>
             </div>
-            <div class="form-group">
-                <label class="form-label">Passphrase (部分交易所需要)</label>
+            <div class="form-group" id="passphraseGroup">
+                <label class="form-label">Passphrase <span id="passphraseRequired" style="color: var(--danger); display: none;">*必填</span></label>
                 <div class="password-input-wrapper">
-                    <input type="password" class="form-input mono-input" id="apiPassphrase" placeholder="可选，OKX等交易所需要">
+                    <input type="password" class="form-input mono-input" id="apiPassphrase" placeholder="OKX、Bitget 等交易所需要">
                     <button class="toggle-password" onclick="togglePasswordVisibility('apiPassphrase')">👁️</button>
                 </div>
             </div>
@@ -42,6 +51,12 @@
             <div class="modal-actions">
                 <button class="btn-secondary" onclick="testApiConnection()">测试连接</button>
                 <button class="btn-primary" onclick="saveExchangeConfig()">保存配置</button>
+            </div>
+            <!-- 删除配置按钮 -->
+            <div id="deleteExchangeBtn" style="display: none; margin-top: 1rem; text-align: center;">
+                <button onclick="deleteExchangeConfig()" style="background: none; border: none; color: var(--danger); cursor: pointer; font-size: 0.875rem;">
+                    删除当前配置
+                </button>
             </div>
         </div>
     </div>

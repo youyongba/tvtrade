@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { User, Webhook } = require('../models');
+const { sendPasswordResetEmail } = require('../utils/sendEmail');
 
 // 生成 JWT Token
 const signToken = (id) => {
@@ -264,4 +266,226 @@ exports.logout = async (req, res, next) => {
     success: true,
     message: '已退出登录'
   });
+};
+
+/**
+ * @desc    请求密码重置（发送重置邮件/获取重置token）
+ * @route   POST /api/auth/forgot-password
+ * @access  Public
+ */
+exports.forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'BAD_REQUEST',
+          message: '请填写邮箱地址'
+        }
+      });
+    }
+
+    // 查找用户
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: '该邮箱未注册'
+        }
+      });
+    }
+
+    // 检查账号是否激活
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: '账号已被禁用'
+        }
+      });
+    }
+
+    // 生成重置 token
+    const resetToken = user.createPasswordResetToken();
+    await user.save({ validateBeforeSave: false });
+
+    // 生成重置 URL
+    const resetUrl = `${process.env.FRONTEND_URL || req.protocol + '://' + req.get('host')}/reset-password/${resetToken}`;
+
+    try {
+      // 发送重置邮件
+      await sendPasswordResetEmail(user.email, resetUrl, user.username);
+      console.log('Password reset email sent to:', user.email);
+
+      res.status(200).json({
+        success: true,
+        message: '密码重置链接已发送到您的邮箱，请查收'
+      });
+
+    } catch (emailError) {
+      // 邮件发送失败，清除重置 token
+      console.error('Email send error:', emailError);
+      user.clearPasswordResetToken();
+      await user.save({ validateBeforeSave: false });
+
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'EMAIL_ERROR',
+          message: '邮件发送失败，请稍后重试'
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('ForgotPassword error:', error);
+
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: '服务器内部错误，请稍后重试'
+      }
+    });
+  }
+};
+
+/**
+ * @desc    验证重置 Token 是否有效
+ * @route   GET /api/auth/reset-password/:token
+ * @access  Public
+ */
+exports.validateResetToken = async (req, res, next) => {
+  try {
+    const { token } = req.params;
+
+    // 哈希 token 进行比对
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    // 查找有效的重置 token
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_TOKEN',
+          message: '重置链接无效或已过期'
+        }
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Token 有效',
+      data: {
+        email: user.email
+      }
+    });
+
+  } catch (error) {
+    console.error('ValidateResetToken error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: '服务器内部错误'
+      }
+    });
+  }
+};
+
+/**
+ * @desc    重置密码
+ * @route   POST /api/auth/reset-password/:token
+ * @access  Public
+ */
+exports.resetPassword = async (req, res, next) => {
+  try {
+    const { token } = req.params;
+    const { password, confirmPassword } = req.body;
+
+    // 验证密码
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'BAD_REQUEST',
+          message: '请填写新密码'
+        }
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'BAD_REQUEST',
+          message: '密码至少需要6个字符'
+        }
+      });
+    }
+
+    if (confirmPassword && password !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'BAD_REQUEST',
+          message: '两次输入的密码不一致'
+        }
+      });
+    }
+
+    // 哈希 token 进行比对
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    // 查找有效的重置 token
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_TOKEN',
+          message: '重置链接无效或已过期'
+        }
+      });
+    }
+
+    // 更新密码
+    user.password = password;
+    user.clearPasswordResetToken();
+    await user.save();
+
+    // 返回新的登录 token
+    sendTokenResponse(user, 200, res);
+
+  } catch (error) {
+    console.error('ResetPassword error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: '服务器内部错误'
+      }
+    });
+  }
 };

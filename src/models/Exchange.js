@@ -75,14 +75,13 @@ const exchangeSchema = new mongoose.Schema({
 exchangeSchema.index({ user: 1, exchange: 1 }, { unique: true });
 
 // 保存前加密敏感数据
-exchangeSchema.pre('save', function(next) {
+exchangeSchema.pre('save', function() {
   if (this.isModified('apiSecret')) {
     this.apiSecret = encrypt(this.apiSecret);
   }
   if (this.isModified('passphrase') && this.passphrase) {
     this.passphrase = encrypt(this.passphrase);
   }
-  next();
 });
 
 // 解密方法
