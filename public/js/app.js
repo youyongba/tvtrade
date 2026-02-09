@@ -303,11 +303,16 @@ async function handleLogout() {
         console.error('Logout error:', error);
     }
 
-    // 清除本地数据
+    // 清除所有本地数据（用户、Token、交易所配置、Webhook配置）
     currentUser = null;
     authToken = null;
+    exchangeConfig = null;
+    webhookConfig = null;
+    
     localStorage.removeItem('tvtrade_user');
     localStorage.removeItem('tvtrade_token');
+    localStorage.removeItem('tvtrade_exchange');
+    localStorage.removeItem('tvtrade_webhook');
     
     updateUIState();
     showToast('已退出登录', 'success');
