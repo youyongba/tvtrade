@@ -893,7 +893,7 @@ function updateUIState() {
 
 // Data stores
 let entries = [
-    { id: 1, positionSize: '30', orderType: 'market', price: '', enabled: true }
+    { id: 1, positionSize: '30', orderType: 'market', enabled: true }
 ];
 
 let takeProfits = [
@@ -986,9 +986,9 @@ function renderEntries() {
                     <span class="tp-input-suffix">% 仓位</span>
                 </div>
                 ${entry.orderType === 'limit' ? `
-                <div class="tp-input-group" style="flex: 1;">
-                    <input type="text" class="form-input" value="${entry.price}" placeholder="开仓价格" oninput="updateEntryPrice(${entry.id}, this.value)">
-                    <span class="tp-input-suffix">USDT</span>
+                <div class="tp-input-group" style="flex: 0.8;">
+                    <span class="form-input" style="background: var(--bg-tertiary); display: flex; align-items: center; color: var(--accent-cyan);">{{close}}</span>
+                    <span class="tp-input-suffix">当前价</span>
                 </div>
                 ` : ''}
                 <button class="copy-btn" onclick="copyEntryWebhook(${entry.id})" style="height: 42px; min-width: 80px;">复制</button>
@@ -1007,7 +1007,6 @@ function addEntry() {
         id: entryIdCounter++, 
         positionSize: '20', 
         orderType: 'market', 
-        price: '',
         enabled: true 
     });
     renderEntries();
@@ -1039,14 +1038,6 @@ function updateEntryPositionSize(id, value) {
     const entry = entries.find(e => e.id === id);
     if (entry) {
         entry.positionSize = value;
-        updateAllWebhooks();
-    }
-}
-
-function updateEntryPrice(id, value) {
-    const entry = entries.find(e => e.id === id);
-    if (entry) {
-        entry.price = value;
         updateAllWebhooks();
     }
 }
@@ -1188,7 +1179,7 @@ function copyAllWebhooks() {
         if (entry.enabled) {
             const entryEl = document.getElementById(`entryWebhook_${entry.id}`);
             if (entryEl) {
-                text += `=== 开仓${entries.length > 1 ? index + 1 : ''}警报 (${entry.positionSize}%仓位${entry.orderType === 'limit' ? ', 限价' + entry.price : ''}) ===\n${entryEl.textContent}\n\n`;
+                text += `=== 开仓${entries.length > 1 ? index + 1 : ''}警报 (${entry.positionSize}%仓位, ${entry.orderType === 'limit' ? '限价' : '市价'}) ===\n${entryEl.textContent}\n\n`;
             }
         }
     });
@@ -1246,9 +1237,9 @@ function updateAllWebhooks() {
             timestamp: "{{timenow}}"
         };
         
-        // 如果是限价单，添加价格
-        if (entry.orderType === 'limit' && entry.price) {
-            entryWebhook.price = parseFloat(entry.price);
+        // 如果是限价单，使用 TradingView 的当前价格变量
+        if (entry.orderType === 'limit') {
+            entryWebhook.price = "{{close}}";
         }
         
         const el = document.getElementById(`entryWebhook_${entry.id}`);
@@ -1303,9 +1294,8 @@ function updateSummary(settings) {
     // 显示所有开仓
     entries.forEach((entry, index) => {
         if (entry.enabled) {
-            const priceInfo = entry.orderType === 'limit' && entry.price ? ` @${entry.price}` : '';
             const orderTypeText = entry.orderType === 'limit' ? '限价' : '市价';
-            html += `<div class="alert-summary-item"><span class="alert-tag open">开仓${entries.length > 1 ? index + 1 : ''}</span><span class="alert-desc">做${settings.direction === 'long' ? '多' : '空'} ${settings.leverage}x ${entry.positionSize}% ${orderTypeText}${priceInfo}</span></div>`;
+            html += `<div class="alert-summary-item"><span class="alert-tag open">开仓${entries.length > 1 ? index + 1 : ''}</span><span class="alert-desc">做${settings.direction === 'long' ? '多' : '空'} ${settings.leverage}x ${entry.positionSize}% ${orderTypeText}</span></div>`;
         }
     });
     
