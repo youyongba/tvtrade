@@ -627,6 +627,63 @@ async function loadExchangeConfig() {
     }
 }
 
+// 刷新交易所余额（实时查询）
+async function refreshBalance() {
+    if (!authToken) {
+        showToast('请先登录', 'error');
+        return;
+    }
+
+    if (!exchangeConfig || !exchangeConfig.id) {
+        showToast('请先配置交易所 API', 'error');
+        return;
+    }
+
+    const refreshBtn = document.getElementById('refreshBalanceBtn');
+    const balanceDisplay = document.getElementById('balanceDisplay');
+    
+    // 显示加载状态
+    if (refreshBtn) {
+        refreshBtn.style.animation = 'spin 1s linear infinite';
+        refreshBtn.disabled = true;
+    }
+    balanceDisplay.textContent = '余额: 刷新中...';
+    balanceDisplay.style.color = 'var(--text-muted)';
+
+    try {
+        const result = await apiRequest('/exchanges/refresh-balance', {
+            method: 'POST'
+        });
+
+        if (result.success) {
+            // 更新本地状态
+            exchangeConfig.connected = result.data.connected;
+            exchangeConfig.balance = result.data.balance;
+            exchangeConfig.permissions = result.data.permissions;
+            localStorage.setItem('tvtrade_exchange', JSON.stringify(exchangeConfig));
+
+            balanceDisplay.textContent = `余额: $${result.data.balance.toLocaleString()}`;
+            balanceDisplay.style.color = 'var(--accent-gold)';
+            showToast(`余额已刷新: $${result.data.balance.toLocaleString()}`, 'success');
+        } else {
+            balanceDisplay.textContent = '余额: 刷新失败';
+            balanceDisplay.style.color = 'var(--danger)';
+            showToast(result.error?.message || '刷新余额失败', 'error');
+        }
+
+    } catch (error) {
+        balanceDisplay.textContent = '余额: 刷新失败';
+        balanceDisplay.style.color = 'var(--danger)';
+        showToast(error.message || '刷新余额失败', 'error');
+    } finally {
+        // 恢复按钮状态
+        if (refreshBtn) {
+            refreshBtn.style.animation = '';
+            refreshBtn.disabled = false;
+        }
+    }
+}
+
 // 删除交易所配置
 async function deleteExchangeConfig() {
     if (!exchangeConfig || !exchangeConfig.id) {

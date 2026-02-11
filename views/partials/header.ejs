@@ -9,8 +9,9 @@
             <div class="status-item clickable" onclick="openModal('exchangeModal')">
                 <span id="exchangeStatus">交易所: 未连接</span>
             </div>
-            <div class="status-item">
+            <div class="status-item" style="display: flex; align-items: center; gap: 0.5rem;">
                 <span id="balanceDisplay" style="font-family: 'JetBrains Mono', monospace; color: var(--text-muted);">余额: --</span>
+                <button id="refreshBalanceBtn" onclick="refreshBalance()" title="刷新余额" style="background: none; border: none; cursor: pointer; padding: 2px; font-size: 14px; opacity: 0.7; transition: opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7">🔄</button>
             </div>
             <button class="header-btn" id="userBtn" onclick="openModal('loginModal')">
                 <span class="user-icon">👤</span>

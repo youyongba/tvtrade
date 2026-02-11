@@ -10,6 +10,7 @@ router.get('/supported', exchangeController.getSupportedExchanges);
 router.get('/', protect, exchangeController.getExchangeConfig);
 router.post('/', protect, exchangeController.saveExchangeConfig);
 router.post('/test', protect, exchangeController.testConnection);
+router.post('/refresh-balance', protect, exchangeController.refreshBalance);
 router.delete('/:id', protect, exchangeController.deleteExchangeConfig);
 
 module.exports = router;

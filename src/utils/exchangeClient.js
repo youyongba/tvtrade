@@ -114,12 +114,18 @@ async function testBinanceConnection(apiKey, apiSecret) {
     throw new Error(data.msg || `Error code: ${data.code}`);
   }
   
-  // 计算 USDT 余额
+  // 计算 USDT 余额（U本位合约账户）
   let balance = 0;
+  console.log('Binance Futures balance response:', JSON.stringify(data).slice(0, 500));
+  
   if (Array.isArray(data)) {
     const usdtAsset = data.find(a => a.asset === 'USDT');
     if (usdtAsset) {
-      balance = parseFloat(usdtAsset.balance || usdtAsset.availableBalance || 0);
+      // balance: 钱包余额, availableBalance: 可用余额, crossWalletBalance: 全仓余额
+      console.log('USDT asset found:', JSON.stringify(usdtAsset));
+      balance = parseFloat(usdtAsset.balance || usdtAsset.crossWalletBalance || usdtAsset.availableBalance || 0);
+    } else {
+      console.log('No USDT asset found in futures account. Available assets:', data.map(a => a.asset).join(', '));
     }
   }
   

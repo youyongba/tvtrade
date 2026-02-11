@@ -2,8 +2,16 @@ const mongoose = require('mongoose');
 const crypto = require('crypto');
 
 // 加密配置
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex').slice(0, 32);
 const IV_LENGTH = 16;
+let ENCRYPTION_KEY;
+
+if (process.env.ENCRYPTION_KEY) {
+  ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+} else {
+  console.warn('⚠️  警告: ENCRYPTION_KEY 未设置，使用随机密钥。服务器重启后已保存的 API Secret 将无法解密！');
+  console.warn('⚠️  请在 .env 文件中设置 ENCRYPTION_KEY=<32字符的密钥>');
+  ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex').slice(0, 32);
+}
 
 function encrypt(text) {
   if (!text) return text;

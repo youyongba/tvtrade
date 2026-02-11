@@ -315,3 +315,78 @@ exports.deleteExchangeConfig = async (req, res) => {
   }
 };
 
+/**
+ * @desc    刷新交易所余额（实时查询）
+ * @route   POST /api/exchanges/refresh-balance
+ * @access  Private
+ */
+exports.refreshBalance = async (req, res) => {
+  try {
+    // 获取用户的交易所配置（包含加密的 API 密钥）
+    const exchange = await Exchange.findOne({ user: req.user.id }).select('+apiSecret +passphrase');
+
+    if (!exchange) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: '请先配置交易所 API'
+        }
+      });
+    }
+
+    // 解密 API 密钥
+    const apiKey = exchange.apiKey;
+    const apiSecret = exchange.getDecryptedSecret();
+    const passphrase = exchange.getDecryptedPassphrase();
+
+    console.log(`Refreshing balance for ${exchange.exchange}...`);
+
+    // 调用交易所 API 获取最新余额
+    const testResult = await testExchangeConnection(exchange.exchange, apiKey, apiSecret, passphrase);
+
+    if (testResult.success) {
+      // 更新数据库中的余额
+      exchange.connected = true;
+      exchange.balance = testResult.balance;
+      exchange.permissions = testResult.permissions || [];
+      exchange.lastConnectedAt = new Date();
+      await exchange.save();
+
+      console.log(`Balance refreshed: ${testResult.balance}`);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          connected: true,
+          balance: testResult.balance,
+          permissions: testResult.permissions,
+          updatedAt: new Date()
+        }
+      });
+    } else {
+      // 连接失败
+      exchange.connected = false;
+      await exchange.save();
+
+      res.status(200).json({
+        success: false,
+        error: {
+          code: 'CONNECTION_FAILED',
+          message: testResult.message || 'API 连接失败'
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('RefreshBalance error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误'
+      }
+    });
+  }
+};
+
