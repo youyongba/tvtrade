@@ -892,6 +892,10 @@ function updateUIState() {
 }
 
 // Data stores
+let entries = [
+    { id: 1, positionSize: '30', orderType: 'market', price: '', enabled: true }
+];
+
 let takeProfits = [
     { id: 1, closePercent: '50', orderType: 'market', enabled: true },
     { id: 2, closePercent: '30', orderType: 'market', enabled: true },
@@ -902,6 +906,7 @@ let stopLosses = [
     { id: 1, closePercent: '100', orderType: 'market', enabled: true }
 ];
 
+let entryIdCounter = 2;
 let tpIdCounter = 4;
 let slIdCounter = 2;
 
@@ -951,6 +956,103 @@ document.querySelectorAll('.toggle-group').forEach(group => {
 // Symbol change
 document.querySelector('select').addEventListener('change', updateAllWebhooks);
 
+// ==================== 分批开仓 ====================
+
+// Render Entries
+function renderEntries() {
+    const container = document.getElementById('entryContainer');
+    if (!container) return;
+    
+    const settings = getSettings();
+    
+    container.innerHTML = entries.map((entry, index) => `
+        <div class="tp-section active entry-section" data-entry-id="${entry.id}" style="border-color: var(--accent-cyan);">
+            <div class="tpsl-header-row">
+                <div class="tpsl-header-left">
+                    <input type="checkbox" class="entry-checkbox" ${entry.enabled ? 'checked' : ''} onchange="toggleEntry(${entry.id})">
+                    <span class="tp-label" style="color: var(--accent-cyan);">🚀 开仓 ${index + 1}</span>
+                </div>
+                <div class="tpsl-header-right">
+                    <div class="mini-toggle">
+                        <button class="mini-toggle-btn ${entry.orderType === 'market' ? 'active' : ''}" onclick="setEntryOrderType(${entry.id}, 'market')">市价</button>
+                        <button class="mini-toggle-btn ${entry.orderType === 'limit' ? 'active' : ''}" onclick="setEntryOrderType(${entry.id}, 'limit')">限价</button>
+                    </div>
+                    ${entries.length > 1 ? `<button class="delete-btn" onclick="deleteEntry(${entry.id})">×</button>` : ''}
+                </div>
+            </div>
+            <div class="tpsl-simple-row">
+                <div class="tp-input-group" style="flex: 1;">
+                    <input type="text" class="form-input" value="${entry.positionSize}" placeholder="仓位比例" oninput="updateEntryPositionSize(${entry.id}, this.value)">
+                    <span class="tp-input-suffix">% 仓位</span>
+                </div>
+                ${entry.orderType === 'limit' ? `
+                <div class="tp-input-group" style="flex: 1;">
+                    <input type="text" class="form-input" value="${entry.price}" placeholder="开仓价格" oninput="updateEntryPrice(${entry.id}, this.value)">
+                    <span class="tp-input-suffix">USDT</span>
+                </div>
+                ` : ''}
+                <button class="copy-btn" onclick="copyEntryWebhook(${entry.id})" style="height: 42px; min-width: 80px;">复制</button>
+            </div>
+            <div class="webhook-container" style="margin-top: 0.75rem; border-color: var(--accent-cyan);">
+                <div class="webhook-code" id="entryWebhook_${entry.id}" style="max-height: 80px; font-size: 0.7rem;"></div>
+            </div>
+        </div>
+    `).join('');
+    
+    updateAllWebhooks();
+}
+
+function addEntry() {
+    entries.push({ 
+        id: entryIdCounter++, 
+        positionSize: '20', 
+        orderType: 'market', 
+        price: '',
+        enabled: true 
+    });
+    renderEntries();
+}
+
+function deleteEntry(id) {
+    if (entries.length <= 1) return;
+    entries = entries.filter(e => e.id !== id);
+    renderEntries();
+}
+
+function toggleEntry(id) {
+    const entry = entries.find(e => e.id === id);
+    if (entry) {
+        entry.enabled = !entry.enabled;
+        updateAllWebhooks();
+    }
+}
+
+function setEntryOrderType(id, type) {
+    const entry = entries.find(e => e.id === id);
+    if (entry) {
+        entry.orderType = type;
+        renderEntries();
+    }
+}
+
+function updateEntryPositionSize(id, value) {
+    const entry = entries.find(e => e.id === id);
+    if (entry) {
+        entry.positionSize = value;
+        updateAllWebhooks();
+    }
+}
+
+function updateEntryPrice(id, value) {
+    const entry = entries.find(e => e.id === id);
+    if (entry) {
+        entry.price = value;
+        updateAllWebhooks();
+    }
+}
+
+// ==================== 分批止盈 ====================
+
 // Render Take Profits
 function renderTakeProfits() {
     const container = document.getElementById('tpContainer');
@@ -991,7 +1093,7 @@ function renderStopLosses() {
         <div class="sl-section active" data-sl-id="${sl.id}">
             <div class="tpsl-header-row">
                 <div class="tpsl-header-left">
-                    <input type="checkbox" class="tp-checkbox" ${sl.enabled ? 'checked' : ''} onchange="toggleSL(${sl.id})">
+                    <input type="checkbox" class="sl-checkbox" ${sl.enabled ? 'checked' : ''} onchange="toggleSL(${sl.id})">
                     <span class="sl-label">🛡️ 止损 ${stopLosses.length > 1 ? index + 1 : ''}</span>
                 </div>
                 <div class="tpsl-header-right">
@@ -1050,6 +1152,7 @@ function updateSLValue(id, field, value) { const sl = stopLosses.find(s => s.id 
 
 function copyTPWebhook(id) { const code = document.getElementById(`tpWebhook_${id}`).textContent; copyToClipboard(code, document.querySelector(`[data-tp-id="${id}"] .copy-btn`)); }
 function copySLWebhook(id) { const code = document.getElementById(`slWebhook_${id}`).textContent; copyToClipboard(code, document.querySelector(`[data-sl-id="${id}"] .copy-btn`)); }
+function copyEntryWebhook(id) { const code = document.getElementById(`entryWebhook_${id}`).textContent; copyToClipboard(code, document.querySelector(`[data-entry-id="${id}"] .copy-btn`)); }
 
 function copyWebhook(elementId) {
     const code = document.getElementById(elementId).textContent;
@@ -1078,21 +1181,31 @@ function copyToClipboard(text, btn) {
 
 function copyAllWebhooks() {
     const settings = getSettings();
-    let text = `=== 开仓警报 ===\n${document.getElementById('openWebhook').textContent}\n`;
+    let text = '';
+    
+    // 添加所有开仓警报
+    entries.forEach((entry, index) => {
+        if (entry.enabled) {
+            const entryEl = document.getElementById(`entryWebhook_${entry.id}`);
+            if (entryEl) {
+                text += `=== 开仓${entries.length > 1 ? index + 1 : ''}警报 (${entry.positionSize}%仓位${entry.orderType === 'limit' ? ', 限价' + entry.price : ''}) ===\n${entryEl.textContent}\n\n`;
+            }
+        }
+    });
     
     takeProfits.forEach((tp, index) => {
         if (tp.enabled) {
-            text += `\n=== 止盈${index + 1}警报 (平${tp.closePercent}%仓) ===\n${document.getElementById(`tpWebhook_${tp.id}`).textContent}\n`;
+            text += `=== 止盈${index + 1}警报 (平${tp.closePercent}%仓) ===\n${document.getElementById(`tpWebhook_${tp.id}`).textContent}\n\n`;
         }
     });
     
     stopLosses.forEach((sl, index) => {
         if (sl.enabled) {
-            text += `\n=== 止损${stopLosses.length > 1 ? index + 1 : ''}警报 (平${sl.closePercent}%仓) ===\n${document.getElementById(`slWebhook_${sl.id}`).textContent}\n`;
+            text += `=== 止损${stopLosses.length > 1 ? index + 1 : ''}警报 (平${sl.closePercent}%仓) ===\n${document.getElementById(`slWebhook_${sl.id}`).textContent}\n\n`;
         }
     });
     
-    navigator.clipboard.writeText(text).then(() => {
+    navigator.clipboard.writeText(text.trim()).then(() => {
         const btn = document.querySelector('#summaryContainer').parentElement.querySelector('.copy-btn');
         const originalText = btn.textContent;
         btn.textContent = '已复制全部 ✓';
@@ -1102,11 +1215,9 @@ function copyAllWebhooks() {
 
 function getSettings() {
     const direction = document.querySelector('.toggle-btn.long.active') ? 'long' : 'short';
-    const orderType = document.querySelectorAll('.toggle-group')[1].querySelector('.toggle-btn.active')?.textContent.includes('市价') ? 'market' : 'limit';
-    const leverage = document.querySelector('input[max="125"]').value;
-    const positionSize = document.querySelector('input[max="100"]').value;
-    const symbol = document.querySelector('.left-panel select').value;
-    return { direction, orderType, leverage, positionSize, symbol };
+    const leverage = document.querySelector('input[max="125"]')?.value || '20';
+    const symbol = document.querySelector('.left-panel select')?.value || 'BTCUSDT';
+    return { direction, leverage, symbol };
 }
 
 // 获取用户 token (从 webhook URL 中提取)
@@ -1122,16 +1233,27 @@ function updateAllWebhooks() {
     const settings = getSettings();
     const userToken = getUserToken();
     
-    const openWebhook = {
-        token: userToken,
-        action: `open_${settings.direction}`,
-        symbol: settings.symbol,
-        leverage: parseInt(settings.leverage),
-        position_size: `${settings.positionSize}%`,
-        order_type: settings.orderType,
-        timestamp: "{{timenow}}"
-    };
-    document.getElementById('openWebhook').textContent = JSON.stringify(openWebhook, null, 2);
+    // 更新每个开仓的 Webhook
+    entries.forEach((entry, index) => {
+        const entryWebhook = {
+            token: userToken,
+            action: `open_${settings.direction}`,
+            symbol: settings.symbol,
+            leverage: parseInt(settings.leverage),
+            position_size: `${entry.positionSize}%`,
+            order_type: entry.orderType,
+            entry_index: index + 1,
+            timestamp: "{{timenow}}"
+        };
+        
+        // 如果是限价单，添加价格
+        if (entry.orderType === 'limit' && entry.price) {
+            entryWebhook.price = parseFloat(entry.price);
+        }
+        
+        const el = document.getElementById(`entryWebhook_${entry.id}`);
+        if (el) el.textContent = JSON.stringify(entryWebhook, null, 2);
+    });
     
     const protectionSL = document.getElementById('protectionSL')?.checked || false;
     const protectionOrderType = document.querySelector('#protectionOrderType .mini-toggle-btn.active')?.dataset.type || 'market';
@@ -1176,7 +1298,16 @@ function updateAllWebhooks() {
 
 function updateSummary(settings) {
     const container = document.getElementById('summaryContainer');
-    let html = `<div class="alert-summary-item"><span class="alert-tag open">开仓</span><span class="alert-desc">做${settings.direction === 'long' ? '多' : '空'} ${settings.leverage}x ${settings.positionSize}%</span></div>`;
+    let html = '';
+    
+    // 显示所有开仓
+    entries.forEach((entry, index) => {
+        if (entry.enabled) {
+            const priceInfo = entry.orderType === 'limit' && entry.price ? ` @${entry.price}` : '';
+            const orderTypeText = entry.orderType === 'limit' ? '限价' : '市价';
+            html += `<div class="alert-summary-item"><span class="alert-tag open">开仓${entries.length > 1 ? index + 1 : ''}</span><span class="alert-desc">做${settings.direction === 'long' ? '多' : '空'} ${settings.leverage}x ${entry.positionSize}% ${orderTypeText}${priceInfo}</span></div>`;
+        }
+    });
     
     const showProtectionSL = document.getElementById('protectionSL')?.checked || false;
     takeProfits.forEach((tp, index) => {
@@ -1199,6 +1330,7 @@ function updateSummary(settings) {
 
 function saveCurrentConfig() {
     const settings = getSettings();
+    const totalPositionSize = entries.reduce((sum, e) => sum + parseInt(e.positionSize || 0), 0);
     const configName = `${settings.symbol} ${settings.direction === 'long' ? '做多' : '做空'} ${settings.leverage}x`;
     
     const config = {
@@ -1206,9 +1338,8 @@ function saveCurrentConfig() {
         name: configName,
         symbol: settings.symbol,
         direction: settings.direction,
-        orderType: settings.orderType,
         leverage: settings.leverage,
-        positionSize: settings.positionSize,
+        entries: JSON.parse(JSON.stringify(entries)),
         takeProfits: JSON.parse(JSON.stringify(takeProfits)),
         stopLosses: JSON.parse(JSON.stringify(stopLosses)),
         protectionSL: document.getElementById('protectionSL')?.checked || false,
@@ -1237,18 +1368,26 @@ function loadConfig(id) {
     if (config.direction === 'long') dirBtns[0].classList.add('active');
     else dirBtns[1].classList.add('active');
     
-    const orderBtns = document.querySelectorAll('.toggle-group')[1].querySelectorAll('.toggle-btn');
-    orderBtns.forEach(btn => btn.classList.remove('active'));
-    if (config.orderType === 'market') orderBtns[0].classList.add('active');
-    else orderBtns[1].classList.add('active');
-    
     const leverageSlider = document.querySelector('input[max="125"]');
-    leverageSlider.value = config.leverage;
-    leverageSlider.parentElement.querySelector('.slider-value').textContent = config.leverage + 'x';
+    if (leverageSlider) {
+        leverageSlider.value = config.leverage;
+        leverageSlider.parentElement.querySelector('.slider-value').textContent = config.leverage + 'x';
+    }
     
-    const positionSlider = document.querySelector('input[max="100"]');
-    positionSlider.value = config.positionSize;
-    positionSlider.parentElement.querySelector('.slider-value').textContent = config.positionSize + '%';
+    // 加载开仓配置（兼容旧配置）
+    if (config.entries && config.entries.length > 0) {
+        entries = JSON.parse(JSON.stringify(config.entries));
+    } else {
+        // 兼容旧配置：使用旧的 positionSize 和 orderType
+        entries = [{
+            id: 1,
+            positionSize: config.positionSize || '30',
+            orderType: config.orderType || 'market',
+            price: '',
+            enabled: true
+        }];
+    }
+    entryIdCounter = Math.max(...entries.map(e => e.id), 0) + 1;
     
     takeProfits = JSON.parse(JSON.stringify(config.takeProfits));
     stopLosses = JSON.parse(JSON.stringify(config.stopLosses));
@@ -1259,6 +1398,7 @@ function loadConfig(id) {
     if (protectionCheckbox) protectionCheckbox.checked = config.protectionSL || false;
     if (config.protectionOrderType) setProtectionOrderType(config.protectionOrderType);
     
+    renderEntries();
     renderTakeProfits();
     renderStopLosses();
     renderSavedConfigs();
@@ -1478,6 +1618,7 @@ validateSession().then(() => {
     }
 });
 
+renderEntries();
 renderTakeProfits();
 renderStopLosses();
 renderSavedConfigs();
