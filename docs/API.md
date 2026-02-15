@@ -101,6 +101,74 @@ Authorization: Bearer <token>
 }
 ```
 
+### 1.5 找回密码（发送重置邮件）
+```
+POST /api/auth/forgot-password
+```
+
+**Request Body:**
+```json
+{
+  "email": "trader@example.com"
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "message": "重置密码邮件已发送"
+}
+```
+
+### 1.6 验证重置令牌
+```
+GET /api/auth/reset-password/:token
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "message": "令牌有效",
+  "data": {
+    "email": "tra***@example.com"
+  }
+}
+```
+
+**Response 400 (令牌无效或过期):**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_TOKEN",
+    "message": "重置令牌无效或已过期"
+  }
+}
+```
+
+### 1.7 重置密码
+```
+POST /api/auth/reset-password/:token
+```
+
+**Request Body:**
+```json
+{
+  "password": "newPassword123",
+  "confirmPassword": "newPassword123"
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "message": "密码重置成功"
+}
+```
+
 ---
 
 ## 2. 交易所配置模块 `/api/exchanges`
@@ -139,6 +207,8 @@ Authorization: Bearer <token>
 }
 ```
 
+**说明:** 保存配置时会自动测试连接并获取余额。
+
 **Response 201:**
 ```json
 {
@@ -146,7 +216,10 @@ Authorization: Bearer <token>
   "data": {
     "id": "exc_123",
     "exchange": "binance",
+    "apiKey": "your***_key",
     "connected": true,
+    "balance": 12450.00,
+    "permissions": ["futures"],
     "createdAt": "2026-01-26T10:00:00Z"
   }
 }
@@ -201,7 +274,39 @@ Authorization: Bearer <token>
 }
 ```
 
-### 2.5 删除交易所配置
+### 2.5 刷新交易所余额
+```
+POST /api/exchanges/refresh-balance
+Authorization: Bearer <token>
+```
+
+**说明:** 实时查询交易所 API 获取最新余额（不需要传入 API 密钥，使用已保存的配置）。
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "connected": true,
+    "balance": 12580.50,
+    "permissions": ["futures"],
+    "updatedAt": "2026-01-26T12:00:00Z"
+  }
+}
+```
+
+**Response 200 (连接失败):**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "CONNECTION_FAILED",
+    "message": "API 连接失败"
+  }
+}
+```
+
+### 2.6 删除交易所配置
 ```
 DELETE /api/exchanges/:id
 Authorization: Bearer <token>
@@ -217,11 +322,11 @@ Authorization: Bearer <token>
 
 ---
 
-## 3. Webhook 模块 `/api/webhooks`
+## 3. Webhook 模块 `/api/webhook`
 
 ### 3.1 获取用户 Webhook 信息
 ```
-GET /api/webhooks
+GET /api/webhook
 Authorization: Bearer <token>
 ```
 
@@ -242,7 +347,7 @@ Authorization: Bearer <token>
 
 ### 3.2 重新生成 Webhook
 ```
-POST /api/webhooks/regenerate
+POST /api/webhook/regenerate
 Authorization: Bearer <token>
 ```
 
@@ -263,7 +368,7 @@ Authorization: Bearer <token>
 POST /webhook/:token
 ```
 
-**Request Body (from TradingView):**
+**开仓消息示例 (分批开仓):**
 ```json
 {
   "token": "wh_xyz789",
@@ -272,7 +377,42 @@ POST /webhook/:token
   "leverage": 20,
   "position_size": "30%",
   "order_type": "market",
-  "timestamp": "2026-01-26T10:00:00Z"
+  "entry_index": 1
+}
+```
+
+**止盈消息示例:**
+```json
+{
+  "token": "wh_xyz789",
+  "action": "close_long",
+  "symbol": "BTCUSDT",
+  "close_percent": "50%",
+  "order_type": "market",
+  "tp_index": 1
+}
+```
+
+**止损消息示例:**
+```json
+{
+  "token": "wh_xyz789",
+  "action": "close_long",
+  "symbol": "BTCUSDT",
+  "close_percent": "100%",
+  "order_type": "market",
+  "sl_index": 1
+}
+```
+
+**保护性止损消息示例:**
+```json
+{
+  "token": "wh_xyz789",
+  "action": "protection_sl",
+  "symbol": "BTCUSDT",
+  "close_percent": "100%",
+  "order_type": "market"
 }
 ```
 
@@ -289,6 +429,21 @@ POST /webhook/:token
   }
 }
 ```
+
+### Webhook 字段说明
+
+| 字段 | 类型 | 说明 |
+| -------- | -------- | -------- |
+| token | string | 用户唯一 Webhook 令牌 |
+| action | string | 操作类型: open_long, open_short, close_long, close_short, protection_sl |
+| symbol | string | 交易对，如 BTCUSDT |
+| leverage | number | 杠杆倍数 (仅开仓) |
+| position_size | string | 仓位大小百分比 (仅开仓) |
+| close_percent | string | 平仓百分比 (仅平仓) |
+| order_type | string | 订单类型: market 或 limit |
+| entry_index | number | 开仓索引 (分批开仓时使用) |
+| tp_index | number | 止盈索引 |
+| sl_index | number | 止损索引 |
 
 ---
 
@@ -715,14 +870,29 @@ Token 有效期：7 天
 
 
 ## 总览
-API 文档已创建在 docs/API.md。按页面模块划分为 7 个模块：
-| 模块	 | 路径 | 接口数 |
+
+按页面模块划分为 7 个模块：
+
+| 模块 | 路径 | 接口数 |
 | -------- | -------- | --------: |
-| 用户认证	 | /api/auth	 | 4 |
-| 交易所配置	 | /api/exchanges	 | 5 |
-| Webhook	 | /api/webhooks	 | 3 |
-| 交易配置	 | /api/configs	 | 6 |
-| 活动记录	 | /api/activities	 | 2 |
-| 持仓	 | /api/positions	 | 3 |
-| 订单	 | /api/orders	 | 2 |
-共 25 个 API 接口，包含统一错误响应格式和 JWT 认证说明。
+| 用户认证 | /api/auth | 7 |
+| 交易所配置 | /api/exchanges | 6 |
+| Webhook | /api/webhook | 3 |
+| 交易配置 | /api/configs | 6 |
+| 活动记录 | /api/activities | 2 |
+| 持仓 | /api/positions | 3 |
+| 订单 | /api/orders | 2 |
+
+**共 29 个 API 接口**，包含统一错误响应格式和 JWT 认证说明。
+
+### 已实现接口
+
+| 模块 | 接口 | 状态 |
+| -------- | -------- | :--------: |
+| 用户认证 | 注册、登录、退出、获取用户信息、找回密码、重置密码 | ✅ |
+| 交易所配置 | 获取支持列表、保存配置、获取配置、测试连接、刷新余额、删除配置 | ✅ |
+| Webhook | 获取 Webhook、重新生成 | ✅ |
+| 交易配置 | CRUD 操作 | 📋 待实现 |
+| 活动记录 | 获取/清空记录 | 📋 待实现 |
+| 持仓 | 获取/平仓 | 📋 待实现 |
+| 订单 | 获取历史/详情 | 📋 待实现 |
