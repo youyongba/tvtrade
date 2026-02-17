@@ -14,6 +14,7 @@ router.post('/reset-password/:token', authController.resetPassword);
 
 // 需要认证的路由
 router.get('/me', protect, authController.getMe);
+router.get('/heartbeat', protect, authController.heartbeat);
 router.post('/logout', protect, authController.logout);
 
 module.exports = router;

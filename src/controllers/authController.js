@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { User, Webhook } = require('../models');
+const { User, Webhook, Exchange, Position, Config } = require('../models');
 const { sendPasswordResetEmail } = require('../utils/sendEmail');
 
 // 生成 JWT Token
@@ -486,6 +486,90 @@ exports.resetPassword = async (req, res, next) => {
         code: 'INTERNAL_ERROR',
         message: '服务器内部错误'
       }
+    });
+  }
+};
+
+/**
+ * @desc    心跳接口 - 获取用户完整状态信息
+ * @route   GET /api/auth/heartbeat
+ * @access  Private
+ */
+exports.heartbeat = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: '用户不存在或已被禁用' }
+      });
+    }
+
+    // 获取交易所配置
+    const exchange = await Exchange.findOne({ user: user._id });
+    
+    // 获取 Webhook 统计
+    const webhook = await Webhook.findOne({ user: user._id });
+    
+    // 获取持仓数量
+    const openPositionsCount = await Position.countDocuments({ 
+      user: user._id, 
+      status: 'open' 
+    });
+    
+    // 获取配置数量
+    const configsCount = await Config.countDocuments({ user: user._id });
+
+    // 构建 Webhook URL
+    const defaultBaseUrl = process.env.WEBHOOK_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const webhookBaseUrl = user.webhookBaseUrl || defaultBaseUrl;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        // 用户信息
+        user: {
+          id: user._id,
+          username: user.username,
+          email: user.email,
+          isActive: user.isActive,
+          createdAt: user.createdAt
+        },
+        // Webhook 信息
+        webhook: {
+          url: `${webhookBaseUrl}/webhook/${user.webhookToken}`,
+          token: user.webhookToken,
+          baseUrl: user.webhookBaseUrl || '',
+          status: webhook?.status || 'active',
+          totalReceived: webhook?.totalReceived || 0,
+          lastReceived: webhook?.lastReceivedAt || null,
+          stats: webhook?.stats || { successCount: 0, failCount: 0 }
+        },
+        // 交易所信息
+        exchange: exchange ? {
+          name: exchange.exchange,
+          connected: exchange.connected,
+          balance: exchange.balance,
+          permissions: exchange.permissions,
+          lastUpdated: exchange.updatedAt
+        } : null,
+        // 统计信息
+        stats: {
+          openPositions: openPositionsCount,
+          savedConfigs: configsCount
+        },
+        // 服务器时间（用于同步）
+        serverTime: new Date().toISOString(),
+        timestamp: Date.now()
+      }
+    });
+
+  } catch (error) {
+    console.error('Heartbeat error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: '服务器内部错误' }
     });
   }
 };

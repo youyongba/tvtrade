@@ -87,7 +87,53 @@ Authorization: Bearer <token>
 }
 ```
 
-### 1.4 退出登录
+### 1.4 心跳接口
+```
+GET /api/auth/heartbeat
+Authorization: Bearer <token>
+```
+
+**说明:** 用于第三方软件验证 token 有效性并获取用户完整状态信息。
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "usr_abc123",
+      "username": "trader001",
+      "email": "trader@example.com",
+      "isActive": true,
+      "createdAt": "2026-01-26T10:00:00Z"
+    },
+    "webhook": {
+      "url": "https://tvtrade.io/webhook/wh_xyz789",
+      "token": "wh_xyz789",
+      "baseUrl": "",
+      "status": "active",
+      "totalReceived": 156,
+      "lastReceived": "2026-01-26T09:55:00Z",
+      "stats": { "successCount": 150, "failCount": 6 }
+    },
+    "exchange": {
+      "name": "binance",
+      "connected": true,
+      "balance": 1250.50,
+      "permissions": ["futures", "spot"],
+      "lastUpdated": "2026-01-26T10:00:00Z"
+    },
+    "stats": {
+      "openPositions": 2,
+      "savedConfigs": 5
+    },
+    "serverTime": "2026-01-26T10:00:00Z",
+    "timestamp": 1737885600000
+  }
+}
+```
+
+### 1.5 退出登录
 ```
 POST /api/auth/logout
 Authorization: Bearer <token>
@@ -101,7 +147,7 @@ Authorization: Bearer <token>
 }
 ```
 
-### 1.5 找回密码（发送重置邮件）
+### 1.7 找回密码（发送重置邮件）
 ```
 POST /api/auth/forgot-password
 ```
@@ -121,7 +167,7 @@ POST /api/auth/forgot-password
 }
 ```
 
-### 1.6 验证重置令牌
+### 1.8 验证重置令牌
 ```
 GET /api/auth/reset-password/:token
 ```
@@ -148,7 +194,7 @@ GET /api/auth/reset-password/:token
 }
 ```
 
-### 1.7 重置密码
+### 1.9 重置密码
 ```
 POST /api/auth/reset-password/:token
 ```
