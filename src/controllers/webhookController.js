@@ -22,13 +22,17 @@ exports.getWebhook = async (req, res) => {
     // 查询 Webhook 统计信息
     const webhook = await Webhook.findOne({ user: user._id });
     
-    const baseUrl = process.env.WEBHOOK_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    // 优先使用用户自定义的后端地址，否则使用环境变量或请求来源
+    const defaultBaseUrl = process.env.WEBHOOK_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const baseUrl = user.webhookBaseUrl || defaultBaseUrl;
 
     res.status(200).json({
       success: true,
       data: {
         url: `${baseUrl}/webhook/${user.webhookToken}`,
         token: user.webhookToken,
+        baseUrl: user.webhookBaseUrl || '',
+        defaultBaseUrl,
         status: webhook?.status || 'active',
         lastReceived: webhook?.lastReceivedAt || null,
         totalReceived: webhook?.totalReceived || 0,
@@ -340,6 +344,68 @@ exports.receiveWebhook = async (req, res) => {
         code: 'INTERNAL_ERROR',
         message: '处理 Webhook 失败'
       }
+    });
+  }
+};
+
+/**
+ * @desc    更新后端地址
+ * @route   PUT /api/webhook/base-url
+ * @access  Private
+ */
+exports.updateBaseUrl = async (req, res) => {
+  try {
+    const { baseUrl } = req.body;
+    
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: '用户不存在' }
+      });
+    }
+
+    // 验证 URL 格式（允许空值表示使用默认地址）
+    if (baseUrl && !/^https?:\/\/.+/.test(baseUrl)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'BAD_REQUEST', message: '后端地址必须以 http:// 或 https:// 开头' }
+      });
+    }
+
+    // 去除尾部斜杠
+    user.webhookBaseUrl = baseUrl ? baseUrl.replace(/\/+$/, '') : '';
+    await user.save();
+
+    // 计算新的 Webhook URL
+    const defaultBaseUrl = process.env.WEBHOOK_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const effectiveBaseUrl = user.webhookBaseUrl || defaultBaseUrl;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        baseUrl: user.webhookBaseUrl,
+        url: `${effectiveBaseUrl}/webhook/${user.webhookToken}`,
+        defaultBaseUrl
+      },
+      message: user.webhookBaseUrl ? '后端地址已更新' : '已恢复默认地址'
+    });
+
+  } catch (error) {
+    console.error('UpdateBaseUrl error:', error);
+    
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: messages.join(', ') }
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: '更新后端地址失败' }
     });
   }
 };

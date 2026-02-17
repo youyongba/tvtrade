@@ -337,9 +337,15 @@ Authorization: Bearer <token>
   "data": {
     "url": "https://tvtrade.io/webhook/wh_xyz789",
     "token": "wh_xyz789",
+    "baseUrl": "https://tvtrade.io",
+    "defaultBaseUrl": "http://localhost:3000",
     "status": "active",
     "lastReceived": "2026-01-26T09:55:00Z",
     "totalReceived": 156,
+    "stats": {
+      "successCount": 150,
+      "failCount": 6
+    },
     "createdAt": "2026-01-20T10:00:00Z"
   }
 }
@@ -357,13 +363,44 @@ Authorization: Bearer <token>
   "success": true,
   "data": {
     "url": "https://tvtrade.io/webhook/wh_newtoken123",
-    "token": "wh_newtoken123",
-    "createdAt": "2026-01-26T10:00:00Z"
-  }
+    "token": "wh_newtoken123"
+  },
+  "message": "已生成新的 Webhook URL"
 }
 ```
 
-### 3.3 接收 TradingView Webhook (公开接口)
+### 3.3 更新后端地址
+```
+PUT /api/webhook/base-url
+Authorization: Bearer <token>
+```
+
+**Request Body:**
+```json
+{
+  "baseUrl": "https://your-domain.com"
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "baseUrl": "https://your-domain.com",
+    "url": "https://your-domain.com/webhook/wh_xyz789",
+    "defaultBaseUrl": "http://localhost:3000"
+  },
+  "message": "后端地址已更新"
+}
+```
+
+**说明:**
+- `baseUrl` 可以为空字符串，表示恢复使用默认地址
+- `baseUrl` 必须以 `http://` 或 `https://` 开头
+- 尾部斜杠会自动去除
+
+### 3.4 接收 TradingView Webhook (公开接口)
 ```
 POST /webhook/:token
 ```

@@ -30,6 +30,18 @@ const userSchema = new mongoose.Schema({
     unique: true,
     default: () => 'wh_' + crypto.randomBytes(16).toString('hex')
   },
+  webhookBaseUrl: {
+    type: String,
+    default: '',
+    trim: true,
+    validate: {
+      validator: function(v) {
+        if (!v) return true; // 允许空值
+        return /^https?:\/\/.+/.test(v);
+      },
+      message: '后端地址必须以 http:// 或 https:// 开头'
+    }
+  },
   isActive: {
     type: Boolean,
     default: true

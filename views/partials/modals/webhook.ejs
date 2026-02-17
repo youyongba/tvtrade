@@ -5,6 +5,18 @@
             <button class="modal-close" onclick="closeModal('webhookModal')">×</button>
         </div>
         <div class="modal-body">
+            <!-- 后端地址设置 -->
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label class="form-label">后端地址 <span style="color: var(--text-muted); font-weight: normal;">(可选)</span></label>
+                <div style="display: flex; gap: 0.5rem;">
+                    <input type="text" class="form-input" id="webhookBaseUrlInput" 
+                           placeholder="https://your-domain.com" 
+                           style="flex: 1;">
+                    <button class="btn-secondary" onclick="saveWebhookBaseUrl()" style="white-space: nowrap;">保存</button>
+                </div>
+                <p class="form-hint">留空使用默认地址: <span id="defaultBaseUrlDisplay">--</span></p>
+            </div>
+            
             <div class="webhook-url-display">
                 <label class="form-label">您的 Webhook URL</label>
                 <div class="webhook-url-box">

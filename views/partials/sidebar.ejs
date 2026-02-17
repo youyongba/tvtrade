@@ -18,16 +18,20 @@
             <span class="card-title-icon">🔗</span>
             Webhook URL
         </div>
+        <button class="mini-clear-btn" id="webhookSaveBtn" onclick="saveWebhookUrl()" style="display: none;">保存</button>
     </div>
     <div class="card-body">
         <div class="webhook-url-section">
             <div class="webhook-url-input">
-                <input type="text" class="form-input" id="webhookUrl" value="https://tvtrade.io/webhook/abc123xyz" readonly>
+                <input type="text" class="form-input" id="webhookUrl" 
+                       value="https://tvtrade.io/webhook/abc123xyz" 
+                       oninput="onWebhookUrlChange()"
+                       placeholder="https://your-domain.com/webhook/token">
                 <button class="copy-btn" onclick="copyWebhookUrl()">复制</button>
             </div>
         </div>
         <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.75rem; line-height: 1.5;">
-            将此URL填入TradingView警报的Webhook URL字段
+            可编辑域名部分，格式: <code>https://域名/webhook/token</code>
         </p>
     </div>
 </div>

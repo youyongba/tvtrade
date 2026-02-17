@@ -285,6 +285,8 @@ async function loadUserWebhook() {
             webhookConfig = {
                 url: result.data.url,
                 token: result.data.token,
+                baseUrl: result.data.baseUrl || '',
+                defaultBaseUrl: result.data.defaultBaseUrl || '',
                 status: result.data.status,
                 lastReceived: result.data.lastReceived,
                 totalReceived: result.data.totalReceived,
@@ -296,6 +298,51 @@ async function loadUserWebhook() {
         }
     } catch (error) {
         console.error('加载Webhook失败:', error);
+    }
+}
+
+// 保存后端地址
+async function saveWebhookBaseUrl() {
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        showToast('请先登录', 'error');
+        return;
+    }
+    
+    const input = document.getElementById('webhookBaseUrlInput');
+    const baseUrl = input.value.trim();
+    
+    // 验证 URL 格式（如果不为空）
+    if (baseUrl && !/^https?:\/\/.+/.test(baseUrl)) {
+        showToast('后端地址必须以 http:// 或 https:// 开头', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/webhook/base-url', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ baseUrl })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            webhookConfig.baseUrl = result.data.baseUrl;
+            webhookConfig.url = result.data.url;
+            localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
+            updateUIState();
+            updateAllWebhooks();
+            showToast(result.message || '后端地址已保存', 'success');
+        } else {
+            showToast(result.error?.message || '保存失败', 'error');
+        }
+    } catch (error) {
+        console.error('Save base URL error:', error);
+        showToast('保存后端地址失败', 'error');
     }
 }
 
@@ -1005,15 +1052,32 @@ function updateUIState() {
     const webhookTotalReceived = document.getElementById('webhookTotalReceived');
     const webhookSuccessRate = document.getElementById('webhookSuccessRate');
     const webhookLastReceived = document.getElementById('webhookLastReceived');
+    const webhookBaseUrlInput = document.getElementById('webhookBaseUrlInput');
+    const defaultBaseUrlDisplay = document.getElementById('defaultBaseUrlDisplay');
     
     if (webhookConfig) {
         webhookStatus.textContent = 'Webhook 已配置';
         webhookDot.style.background = 'var(--success)';
         myWebhookUrl.textContent = webhookConfig.url;
-        if (webhookUrlInput) webhookUrlInput.value = webhookConfig.url;
+        if (webhookUrlInput) {
+            webhookUrlInput.value = webhookConfig.url;
+            originalWebhookUrl = webhookConfig.url; // 记录原始值用于比较
+        }
         webhookIndicator.classList.add('connected');
         webhookIndicator.classList.remove('disconnected');
         webhookConnectionText.textContent = webhookConfig.status === 'active' ? '连接正常' : '已暂停';
+        
+        // 隐藏保存按钮
+        const webhookSaveBtn = document.getElementById('webhookSaveBtn');
+        if (webhookSaveBtn) webhookSaveBtn.style.display = 'none';
+        
+        // 更新后端地址输入框
+        if (webhookBaseUrlInput) {
+            webhookBaseUrlInput.value = webhookConfig.baseUrl || '';
+        }
+        if (defaultBaseUrlDisplay) {
+            defaultBaseUrlDisplay.textContent = webhookConfig.defaultBaseUrl || window.location.origin;
+        }
         
         // 更新统计信息
         if (webhookTotalReceived) {
@@ -1047,6 +1111,8 @@ function updateUIState() {
         if (webhookTotalReceived) webhookTotalReceived.textContent = '0';
         if (webhookSuccessRate) webhookSuccessRate.textContent = '--';
         if (webhookLastReceived) webhookLastReceived.textContent = '--';
+        if (webhookBaseUrlInput) webhookBaseUrlInput.value = '';
+        if (defaultBaseUrlDisplay) defaultBaseUrlDisplay.textContent = window.location.origin;
     }
 
     // 交易所状态
@@ -1999,6 +2065,82 @@ function formatRelativeTime(date) {
 function copyWebhookUrl() {
     const url = document.getElementById('webhookUrl').value;
     copyToClipboard(url, document.querySelector('#webhookUrl').parentElement.querySelector('.copy-btn'));
+}
+
+// Webhook URL 编辑状态
+let originalWebhookUrl = '';
+
+// 监听 Webhook URL 输入变化
+function onWebhookUrlChange() {
+    const input = document.getElementById('webhookUrl');
+    const saveBtn = document.getElementById('webhookSaveBtn');
+    
+    if (!input || !saveBtn) return;
+    
+    const currentValue = input.value.trim();
+    const hasChanged = currentValue !== originalWebhookUrl;
+    
+    // 显示/隐藏保存按钮
+    saveBtn.style.display = hasChanged ? 'block' : 'none';
+}
+
+// 保存 Webhook URL（提取域名部分作为 baseUrl）
+async function saveWebhookUrl() {
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        showToast('请先登录', 'error');
+        return;
+    }
+    
+    const input = document.getElementById('webhookUrl');
+    const url = input.value.trim();
+    
+    // 解析 URL 提取 baseUrl
+    // 格式: https://domain.com/webhook/token
+    const webhookPathMatch = url.match(/^(https?:\/\/[^\/]+)(\/webhook\/.+)?$/);
+    
+    if (!webhookPathMatch) {
+        showToast('URL 格式错误，请使用 https://域名/webhook/token 格式', 'error');
+        return;
+    }
+    
+    const baseUrl = webhookPathMatch[1]; // 提取域名部分
+    
+    try {
+        const response = await fetch('/api/webhook/base-url', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ baseUrl })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            webhookConfig.baseUrl = result.data.baseUrl;
+            webhookConfig.url = result.data.url;
+            originalWebhookUrl = result.data.url;
+            localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
+            
+            // 更新输入框为服务器返回的完整 URL
+            input.value = result.data.url;
+            
+            // 隐藏保存按钮
+            document.getElementById('webhookSaveBtn').style.display = 'none';
+            
+            // 更新其他 UI
+            updateUIState();
+            updateAllWebhooks();
+            showToast('Webhook URL 已保存', 'success');
+        } else {
+            showToast(result.error?.message || '保存失败', 'error');
+        }
+    } catch (error) {
+        console.error('Save webhook URL error:', error);
+        showToast('保存失败', 'error');
+    }
 }
 
 function showToast(message, type = 'success') {
