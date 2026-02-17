@@ -1,4 +1,5 @@
 const { User, Webhook, Order, Position, Exchange, Activity } = require('../models');
+const { openPosition, closePosition, getPrice } = require('../utils/exchangeClient');
 
 /**
  * @desc    获取当前用户的 Webhook 配置
@@ -114,8 +115,16 @@ exports.regenerateWebhook = async (req, res) => {
 exports.receiveWebhook = async (req, res) => {
   const { token } = req.params;
   const payload = req.body;
+  const receivedAt = new Date();
 
-  console.log('Webhook received:', { token: token?.slice(0, 10) + '...', payload });
+  // ========== 打印 TradingView Webhook 接收信息 ==========
+  console.log('\n' + '='.repeat(60));
+  console.log('📡 WEBHOOK RECEIVED:', receivedAt.toISOString());
+  console.log('='.repeat(60));
+  console.log('Token:', token?.slice(0, 15) + '...');
+  console.log('Payload JSON:');
+  console.log(JSON.stringify(payload, null, 2));
+  console.log('='.repeat(60) + '\n');
 
   try {
     // 1. 验证 token 并找到用户
@@ -180,7 +189,7 @@ exports.receiveWebhook = async (req, res) => {
       const size = parseFloat(position_size?.replace('%', '') || 30);
       const lev = parseInt(leverage) || 20;
 
-      // 创建订单记录
+      // 创建订单记录（状态为 pending）
       order = await Order.create({
         user: user._id,
         exchange: exchangeConfig.exchange,
@@ -194,51 +203,96 @@ exports.receiveWebhook = async (req, res) => {
         webhookTrigger: `entry_${entry_index || 1}`
       });
 
-      // TODO: 调用交易所 API 执行开仓
-      // 模拟执行成功
-      const mockPrice = symbol.includes('BTC') ? 42000 : 2500;
-      const mockQuantity = (exchangeConfig.balance * size / 100 * lev) / mockPrice;
-      
-      order.executedPrice = mockPrice;
-      order.quantity = mockQuantity;
-      order.status = 'executed';
-      order.executedAt = new Date();
-      await order.save();
+      // ========== 真实交易所下单 ==========
+      try {
+        // 解密 API 密钥
+        const apiKey = exchangeConfig.apiKey;
+        const apiSecret = exchangeConfig.getDecryptedSecret();
+        const passphrase = exchangeConfig.passphrase || '';
+        
+        // 调用交易所 API 开仓
+        const orderResult = await openPosition(
+          exchangeConfig.exchange,
+          apiKey,
+          apiSecret,
+          passphrase,
+          {
+            symbol: symbol.toUpperCase(),
+            direction,
+            leverage: lev,
+            positionSizePercent: size,
+            balance: exchangeConfig.balance,
+            orderType: (order_type || 'market').toUpperCase()
+          }
+        );
 
-      // 创建持仓记录
-      const margin = exchangeConfig.balance * size / 100;
-      const position = await Position.create({
-        user: user._id,
-        exchange: exchangeConfig.exchange,
-        symbol: symbol.toUpperCase(),
-        direction,
-        leverage: lev,
-        entryPrice: mockPrice,
-        currentPrice: mockPrice,
-        quantity: mockQuantity,
-        margin,
-        status: 'open',
-        openedAt: new Date()
-      });
+        // 更新订单状态
+        order.exchangeOrderId = orderResult.orderId?.toString();
+        order.executedPrice = orderResult.entryPrice;
+        order.quantity = orderResult.quantity;
+        order.status = 'executed';
+        order.executedAt = new Date();
+        order.exchangeResponse = orderResult.raw;
+        await order.save();
 
-      result = {
-        orderId: order._id,
-        positionId: position._id,
-        action,
-        symbol,
-        direction,
-        leverage: lev,
-        entryPrice: mockPrice,
-        quantity: mockQuantity,
-        status: 'executed',
-        executedAt: order.executedAt
-      };
+        // 创建持仓记录
+        const position = await Position.create({
+          user: user._id,
+          exchange: exchangeConfig.exchange,
+          symbol: symbol.toUpperCase(),
+          direction,
+          leverage: lev,
+          entryPrice: orderResult.entryPrice,
+          currentPrice: orderResult.entryPrice,
+          quantity: orderResult.quantity,
+          margin: orderResult.margin,
+          status: 'open',
+          openedAt: new Date()
+        });
 
-      // 记录活动
-      await Activity.log(user._id, 'position_opened', 
-        `开${direction === 'long' ? '多' : '空'} ${symbol} ${lev}x`, 
-        { symbol, amount: margin }
-      );
+        result = {
+          orderId: order._id,
+          exchangeOrderId: orderResult.orderId,
+          positionId: position._id,
+          action,
+          symbol: symbol.toUpperCase(),
+          direction,
+          leverage: lev,
+          entryPrice: orderResult.entryPrice,
+          quantity: orderResult.quantity,
+          margin: orderResult.margin,
+          status: 'executed',
+          executedAt: order.executedAt
+        };
+
+        // 记录活动
+        await Activity.log(user._id, 'position_opened', 
+          `开${direction === 'long' ? '多' : '空'} ${symbol} ${lev}x`, 
+          { symbol, amount: orderResult.margin }
+        );
+
+      } catch (tradeError) {
+        console.error('❌ 开仓失败:', tradeError.message);
+        
+        // 更新订单状态为失败
+        order.status = 'failed';
+        order.errorCode = 'TRADE_ERROR';
+        order.errorMessage = tradeError.message;
+        await order.save();
+
+        // 记录失败活动
+        await Activity.log(user._id, 'order_failed', 
+          `开仓失败: ${tradeError.message}`, 
+          { symbol }
+        );
+
+        await webhook.incrementReceived(false);
+        return res.status(500).json({
+          success: false,
+          error: { code: 'TRADE_ERROR', message: tradeError.message }
+        });
+      }
+      // ========== 真实交易所下单结束 ==========
 
     } else if (action.startsWith('close_') || action === 'protection_sl') {
       // 平仓操作
@@ -260,7 +314,7 @@ exports.receiveWebhook = async (req, res) => {
         });
       }
 
-      // 创建订单记录
+      // 创建订单记录（状态为 pending）
       order = await Order.create({
         user: user._id,
         exchange: exchangeConfig.exchange,
@@ -275,49 +329,103 @@ exports.receiveWebhook = async (req, res) => {
         position: position._id
       });
 
-      // TODO: 调用交易所 API 执行平仓
-      // 模拟执行
-      const mockClosePrice = position.entryPrice * (position.direction === 'long' ? 1.02 : 0.98);
-      
-      if (closeSize >= 100) {
-        // 全部平仓
-        await position.close(mockClosePrice, 
-          action === 'protection_sl' ? 'stop_loss' : 
-          tp_index ? 'take_profit' : 'stop_loss'
+      // ========== 真实交易所平仓 ==========
+      try {
+        // 解密 API 密钥
+        const apiKey = exchangeConfig.apiKey;
+        const apiSecret = exchangeConfig.getDecryptedSecret();
+        const passphrase = exchangeConfig.passphrase || '';
+        
+        // 调用交易所 API 平仓
+        const closeResult = await closePosition(
+          exchangeConfig.exchange,
+          apiKey,
+          apiSecret,
+          passphrase,
+          {
+            symbol: symbol.toUpperCase(),
+            direction: position.direction,
+            quantity: position.quantity,
+            closePercent: closeSize,
+            orderType: (order_type || 'market').toUpperCase()
+          }
         );
-      } else {
-        // 部分平仓
-        position.quantity = position.quantity * (1 - closeSize / 100);
-        position.margin = position.margin * (1 - closeSize / 100);
+
+        // 更新订单状态
+        order.exchangeOrderId = closeResult.orderId?.toString();
+        order.executedPrice = closeResult.closePrice;
+        order.quantity = closeResult.closedQuantity;
+        order.status = 'executed';
+        order.executedAt = new Date();
+        order.exchangeResponse = closeResult.raw;
+        await order.save();
+
+        // 计算盈亏
+        const priceDiff = position.direction === 'long' 
+          ? closeResult.closePrice - position.entryPrice
+          : position.entryPrice - closeResult.closePrice;
+        const closedMargin = position.margin * closeSize / 100;
+        const pnl = closedMargin * (priceDiff / position.entryPrice) * position.leverage;
+
+        // 更新持仓
+        if (closeSize >= 100) {
+          // 全部平仓
+          position.status = 'closed';
+          position.closePrice = closeResult.closePrice;
+          position.closedAt = new Date();
+          position.closeReason = action === 'protection_sl' ? 'stop_loss' : 
+                                  tp_index ? 'take_profit' : 'stop_loss';
+          position.realizedPnl = Math.round(pnl * 100) / 100;
+        } else {
+          // 部分平仓
+          position.quantity = position.quantity * (1 - closeSize / 100);
+          position.margin = position.margin * (1 - closeSize / 100);
+        }
         await position.save();
+
+        result = {
+          orderId: order._id,
+          exchangeOrderId: closeResult.orderId,
+          positionId: position._id,
+          action,
+          symbol: symbol.toUpperCase(),
+          closePercent: closeSize,
+          closePrice: closeResult.closePrice,
+          closedQuantity: closeResult.closedQuantity,
+          realizedPnl: Math.round(pnl * 100) / 100,
+          status: 'executed',
+          executedAt: order.executedAt
+        };
+
+        // 记录活动
+        const activityType = tp_index ? 'tp_triggered' : 'sl_triggered';
+        await Activity.log(user._id, activityType, 
+          `${tp_index ? '止盈' : '止损'}触发 平${closeSize}%仓`, 
+          { symbol, amount: Math.round(pnl * 100) / 100 }
+        );
+
+      } catch (tradeError) {
+        console.error('❌ 平仓失败:', tradeError.message);
+        
+        // 更新订单状态为失败
+        order.status = 'failed';
+        order.errorCode = 'TRADE_ERROR';
+        order.errorMessage = tradeError.message;
+        await order.save();
+
+        // 记录失败活动
+        await Activity.log(user._id, 'order_failed', 
+          `平仓失败: ${tradeError.message}`, 
+          { symbol }
+        );
+
+        await webhook.incrementReceived(false);
+        return res.status(500).json({
+          success: false,
+          error: { code: 'TRADE_ERROR', message: tradeError.message }
+        });
       }
-
-      order.executedPrice = mockClosePrice;
-      order.status = 'executed';
-      order.executedAt = new Date();
-      await order.save();
-
-      const pnl = position.realizedPnl || 
-        (position.margin * ((mockClosePrice - position.entryPrice) / position.entryPrice) * position.leverage * (position.direction === 'long' ? 1 : -1));
-
-      result = {
-        orderId: order._id,
-        positionId: position._id,
-        action,
-        symbol,
-        closePercent: closeSize,
-        closePrice: mockClosePrice,
-        realizedPnl: Math.round(pnl * 100) / 100,
-        status: 'executed',
-        executedAt: order.executedAt
-      };
-
-      // 记录活动
-      const activityType = tp_index ? 'tp_triggered' : 'sl_triggered';
-      await Activity.log(user._id, activityType, 
-        `${tp_index ? '止盈' : '止损'}触发 平${closeSize}%仓`, 
-        { symbol, amount: pnl }
-      );
+      // ========== 真实交易所平仓结束 ==========
     } else {
       await webhook.incrementReceived(false);
       return res.status(400).json({
@@ -329,7 +437,13 @@ exports.receiveWebhook = async (req, res) => {
     // 6. 更新统计并返回成功
     await webhook.incrementReceived(true);
 
-    console.log('Webhook processed successfully:', result);
+    // ========== 打印处理结果 ==========
+    console.log('\n' + '-'.repeat(60));
+    console.log('✅ WEBHOOK PROCESSED SUCCESSFULLY');
+    console.log('-'.repeat(60));
+    console.log('Result:');
+    console.log(JSON.stringify(result, null, 2));
+    console.log('-'.repeat(60) + '\n');
 
     res.status(200).json({
       success: true,

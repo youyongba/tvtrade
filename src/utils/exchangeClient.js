@@ -37,21 +37,27 @@ function getProxyAgent() {
   return null;
 }
 
-// 发起 HTTPS 请求
+// 发起 HTTPS 请求（支持 POST body）
 function httpsRequest(url, options = {}) {
   return new Promise((resolve, reject) => {
     const targetUrl = new URL(url);
     const agent = getProxyAgent();
+    const body = options.body || '';
     
-    const req = https.request({
+    const reqOptions = {
       hostname: targetUrl.hostname,
       port: 443,
       path: targetUrl.pathname + targetUrl.search,
       method: options.method || 'GET',
-      headers: options.headers || {},
+      headers: {
+        ...options.headers,
+        ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {})
+      },
       agent: agent,
       timeout: 30000
-    }, (res) => {
+    };
+    
+    const req = https.request(reqOptions, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
@@ -69,6 +75,9 @@ function httpsRequest(url, options = {}) {
       reject(new Error('Request timeout'));
     });
     
+    if (body) {
+      req.write(body);
+    }
     req.end();
   });
 }
@@ -328,8 +337,349 @@ async function getBalance(exchangeId, apiKey, apiSecret, passphrase = '') {
   return result.success ? result.balance : 0;
 }
 
+// ==========================================================
+// 交易功能
+// ==========================================================
+
+/**
+ * 获取 Binance Futures 最新价格
+ */
+async function getBinancePrice(symbol) {
+  const url = `https://fapi.binance.com/fapi/v1/ticker/price?symbol=${symbol}`;
+  const data = await httpsRequest(url, { method: 'GET' });
+  if (data.code) {
+    throw new Error(data.msg || `获取价格失败: ${data.code}`);
+  }
+  return parseFloat(data.price);
+}
+
+/**
+ * 获取 Binance Futures 交易对信息（精度等）
+ */
+async function getBinanceSymbolInfo(symbol) {
+  const url = 'https://fapi.binance.com/fapi/v1/exchangeInfo';
+  const data = await httpsRequest(url, { method: 'GET' });
+  if (data.code) {
+    throw new Error(data.msg || `获取交易对信息失败: ${data.code}`);
+  }
+  const symbolInfo = data.symbols.find(s => s.symbol === symbol);
+  if (!symbolInfo) {
+    throw new Error(`交易对 ${symbol} 不存在`);
+  }
+  
+  // 获取精度
+  const pricePrecision = symbolInfo.pricePrecision;
+  const quantityPrecision = symbolInfo.quantityPrecision;
+  const minQty = parseFloat(symbolInfo.filters.find(f => f.filterType === 'LOT_SIZE')?.minQty || 0.001);
+  
+  return { pricePrecision, quantityPrecision, minQty };
+}
+
+/**
+ * 设置 Binance Futures 杠杆
+ */
+async function setBinanceLeverage(apiKey, apiSecret, symbol, leverage) {
+  const config = EXCHANGE_CONFIG.binance;
+  const serverTime = await getBinanceServerTime();
+  
+  const params = `symbol=${symbol}&leverage=${leverage}&timestamp=${serverTime}&recvWindow=60000`;
+  const signature = createSignature(params, apiSecret);
+  
+  const url = `${config.baseUrl}/fapi/v1/leverage?${params}&signature=${signature}`;
+  
+  const data = await httpsRequest(url, {
+    method: 'POST',
+    headers: {
+      'X-MBX-APIKEY': apiKey,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+  
+  if (data.code && data.code !== 200) {
+    // -4028: 杠杆已设置，忽略
+    if (data.code !== -4028) {
+      console.log(`设置杠杆响应: ${JSON.stringify(data)}`);
+    }
+  }
+  
+  console.log(`✅ 设置杠杆: ${symbol} ${leverage}x`);
+  return { success: true, leverage: data.leverage || leverage };
+}
+
+/**
+ * 设置 Binance Futures 持仓模式（双向持仓）
+ */
+async function setBinancePositionMode(apiKey, apiSecret, dualSidePosition = true) {
+  const config = EXCHANGE_CONFIG.binance;
+  const serverTime = await getBinanceServerTime();
+  
+  const params = `dualSidePosition=${dualSidePosition}&timestamp=${serverTime}&recvWindow=60000`;
+  const signature = createSignature(params, apiSecret);
+  
+  const url = `${config.baseUrl}/fapi/v1/positionSide/dual?${params}&signature=${signature}`;
+  
+  const data = await httpsRequest(url, {
+    method: 'POST',
+    headers: {
+      'X-MBX-APIKEY': apiKey,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+  
+  // -4059: 已经是该模式，忽略
+  if (data.code && data.code !== -4059) {
+    console.log(`设置持仓模式响应: ${JSON.stringify(data)}`);
+  }
+  
+  return { success: true };
+}
+
+/**
+ * Binance Futures 下单
+ * @param {string} apiKey
+ * @param {string} apiSecret
+ * @param {object} orderParams - { symbol, side, positionSide, type, quantity, price? }
+ */
+async function placeBinanceOrder(apiKey, apiSecret, orderParams) {
+  const config = EXCHANGE_CONFIG.binance;
+  const serverTime = await getBinanceServerTime();
+  
+  const { symbol, side, positionSide, type, quantity, price, reduceOnly } = orderParams;
+  
+  let params = `symbol=${symbol}&side=${side}&type=${type}&quantity=${quantity}&timestamp=${serverTime}&recvWindow=60000`;
+  
+  // 双向持仓模式需要 positionSide
+  if (positionSide) {
+    params += `&positionSide=${positionSide}`;
+  }
+  
+  // 限价单需要价格和 timeInForce
+  if (type === 'LIMIT' && price) {
+    params += `&price=${price}&timeInForce=GTC`;
+  }
+  
+  // 平仓时可能需要 reduceOnly
+  if (reduceOnly) {
+    params += `&reduceOnly=true`;
+  }
+  
+  const signature = createSignature(params, apiSecret);
+  const url = `${config.baseUrl}/fapi/v1/order?${params}&signature=${signature}`;
+  
+  console.log(`📤 Binance 下单请求: ${side} ${symbol} ${quantity} @ ${type}${price ? ` ${price}` : ''}`);
+  
+  const data = await httpsRequest(url, {
+    method: 'POST',
+    headers: {
+      'X-MBX-APIKEY': apiKey,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+  
+  if (data.code) {
+    console.error(`❌ Binance 下单失败:`, data);
+    throw new Error(data.msg || `下单失败: ${data.code}`);
+  }
+  
+  console.log(`✅ Binance 下单成功:`, JSON.stringify(data));
+  
+  return {
+    success: true,
+    orderId: data.orderId,
+    clientOrderId: data.clientOrderId,
+    symbol: data.symbol,
+    side: data.side,
+    type: data.type,
+    status: data.status,
+    executedQty: parseFloat(data.executedQty || 0),
+    avgPrice: parseFloat(data.avgPrice || data.price || 0),
+    origQty: parseFloat(data.origQty || quantity),
+    raw: data
+  };
+}
+
+/**
+ * Binance Futures 开仓
+ */
+async function openBinancePosition(apiKey, apiSecret, params) {
+  const { symbol, direction, leverage, positionSizePercent, balance, orderType = 'MARKET' } = params;
+  
+  console.log('\n' + '='.repeat(60));
+  console.log('🚀 BINANCE FUTURES 开仓');
+  console.log('='.repeat(60));
+  console.log(`交易对: ${symbol}, 方向: ${direction}, 杠杆: ${leverage}x`);
+  console.log(`仓位比例: ${positionSizePercent}%, 余额: ${balance} USDT, 订单类型: ${orderType}`);
+  
+  // 1. 设置杠杆
+  await setBinanceLeverage(apiKey, apiSecret, symbol, leverage);
+  
+  // 2. 获取当前价格
+  const price = await getBinancePrice(symbol);
+  console.log(`当前价格: ${price}`);
+  
+  // 3. 获取交易对精度
+  const symbolInfo = await getBinanceSymbolInfo(symbol);
+  console.log(`精度: 价格=${symbolInfo.pricePrecision}, 数量=${symbolInfo.quantityPrecision}, 最小数量=${symbolInfo.minQty}`);
+  
+  // 4. 计算下单数量
+  const margin = balance * positionSizePercent / 100;
+  const notional = margin * leverage;
+  let quantity = notional / price;
+  
+  // 调整精度
+  quantity = Math.floor(quantity * Math.pow(10, symbolInfo.quantityPrecision)) / Math.pow(10, symbolInfo.quantityPrecision);
+  
+  if (quantity < symbolInfo.minQty) {
+    throw new Error(`下单数量 ${quantity} 小于最小数量 ${symbolInfo.minQty}`);
+  }
+  
+  console.log(`计算: 保证金=${margin.toFixed(2)} USDT, 名义价值=${notional.toFixed(2)} USDT, 数量=${quantity}`);
+  
+  // 5. 下单
+  const side = direction === 'long' ? 'BUY' : 'SELL';
+  const positionSide = direction === 'long' ? 'LONG' : 'SHORT';
+  
+  const orderResult = await placeBinanceOrder(apiKey, apiSecret, {
+    symbol,
+    side,
+    positionSide,
+    type: orderType,
+    quantity: quantity.toString()
+  });
+  
+  console.log('='.repeat(60) + '\n');
+  
+  return {
+    success: true,
+    orderId: orderResult.orderId,
+    symbol,
+    direction,
+    leverage,
+    entryPrice: orderResult.avgPrice || price,
+    quantity: orderResult.executedQty || quantity,
+    margin,
+    status: orderResult.status,
+    raw: orderResult.raw
+  };
+}
+
+/**
+ * Binance Futures 平仓
+ */
+async function closeBinancePosition(apiKey, apiSecret, params) {
+  const { symbol, direction, quantity, closePercent = 100, orderType = 'MARKET' } = params;
+  
+  console.log('\n' + '='.repeat(60));
+  console.log('📉 BINANCE FUTURES 平仓');
+  console.log('='.repeat(60));
+  console.log(`交易对: ${symbol}, 方向: ${direction}, 平仓比例: ${closePercent}%`);
+  
+  // 1. 获取当前价格
+  const price = await getBinancePrice(symbol);
+  console.log(`当前价格: ${price}`);
+  
+  // 2. 获取交易对精度
+  const symbolInfo = await getBinanceSymbolInfo(symbol);
+  
+  // 3. 计算平仓数量
+  let closeQuantity = quantity * closePercent / 100;
+  closeQuantity = Math.floor(closeQuantity * Math.pow(10, symbolInfo.quantityPrecision)) / Math.pow(10, symbolInfo.quantityPrecision);
+  
+  if (closeQuantity < symbolInfo.minQty) {
+    // 数量太小，全部平仓
+    closeQuantity = quantity;
+  }
+  
+  console.log(`平仓数量: ${closeQuantity} (原持仓: ${quantity})`);
+  
+  // 4. 下单（平仓方向相反）
+  const side = direction === 'long' ? 'SELL' : 'BUY';
+  const positionSide = direction === 'long' ? 'LONG' : 'SHORT';
+  
+  const orderResult = await placeBinanceOrder(apiKey, apiSecret, {
+    symbol,
+    side,
+    positionSide,
+    type: orderType,
+    quantity: closeQuantity.toString()
+  });
+  
+  console.log('='.repeat(60) + '\n');
+  
+  return {
+    success: true,
+    orderId: orderResult.orderId,
+    symbol,
+    closePrice: orderResult.avgPrice || price,
+    closedQuantity: orderResult.executedQty || closeQuantity,
+    status: orderResult.status,
+    raw: orderResult.raw
+  };
+}
+
+/**
+ * 统一开仓接口
+ */
+async function openPosition(exchangeId, apiKey, apiSecret, passphrase, params) {
+  console.log(`\n📈 执行开仓: ${exchangeId}`);
+  
+  switch (exchangeId) {
+    case 'binance':
+      return await openBinancePosition(apiKey, apiSecret, params);
+    case 'okx':
+      // TODO: 实现 OKX 开仓
+      throw new Error('OKX 开仓功能尚未实现');
+    case 'bybit':
+      // TODO: 实现 Bybit 开仓
+      throw new Error('Bybit 开仓功能尚未实现');
+    case 'bitget':
+      // TODO: 实现 Bitget 开仓
+      throw new Error('Bitget 开仓功能尚未实现');
+    default:
+      throw new Error(`不支持的交易所: ${exchangeId}`);
+  }
+}
+
+/**
+ * 统一平仓接口
+ */
+async function closePosition(exchangeId, apiKey, apiSecret, passphrase, params) {
+  console.log(`\n📉 执行平仓: ${exchangeId}`);
+  
+  switch (exchangeId) {
+    case 'binance':
+      return await closeBinancePosition(apiKey, apiSecret, params);
+    case 'okx':
+      // TODO: 实现 OKX 平仓
+      throw new Error('OKX 平仓功能尚未实现');
+    case 'bybit':
+      // TODO: 实现 Bybit 平仓
+      throw new Error('Bybit 平仓功能尚未实现');
+    case 'bitget':
+      // TODO: 实现 Bitget 平仓
+      throw new Error('Bitget 平仓功能尚未实现');
+    default:
+      throw new Error(`不支持的交易所: ${exchangeId}`);
+  }
+}
+
+/**
+ * 获取实时价格
+ */
+async function getPrice(exchangeId, symbol) {
+  switch (exchangeId) {
+    case 'binance':
+      return await getBinancePrice(symbol);
+    default:
+      throw new Error(`不支持获取 ${exchangeId} 价格`);
+  }
+}
+
 module.exports = {
   testExchangeConnection,
   getBalance,
+  openPosition,
+  closePosition,
+  getPrice,
   EXCHANGE_CONFIG
 };
