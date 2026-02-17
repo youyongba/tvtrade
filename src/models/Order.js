@@ -28,7 +28,8 @@ const orderSchema = new mongoose.Schema({
       'close_long',
       'close_short',
       'take_profit',
-      'stop_loss'
+      'stop_loss',
+      'protection_sl'
     ]
   },
   orderType: {

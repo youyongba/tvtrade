@@ -18,6 +18,9 @@ const connectDB = require('./config/db');
 const authRoutes = require('./routes/auth');
 const webhookRoutes = require('./routes/webhook');
 const exchangeRoutes = require('./routes/exchange');
+const configRoutes = require('./routes/config');
+const positionRoutes = require('./routes/position');
+const activityRoutes = require('./routes/activity');
 
 const app = express();
 
@@ -36,8 +39,15 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.use('/api/auth', authRoutes);
 app.use('/api/webhook', webhookRoutes);
 app.use('/api/exchanges', exchangeRoutes);
+app.use('/api/configs', configRoutes);
+app.use('/api/positions', positionRoutes);
+app.use('/api/activities', activityRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+// 公开 Webhook 接收接口 (TradingView 调用)
+const webhookController = require('./controllers/webhookController');
+app.post('/webhook/:token', webhookController.receiveWebhook);
 
 // Page routes
 app.get('/', (req, res) => {

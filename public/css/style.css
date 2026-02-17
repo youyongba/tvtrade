@@ -714,6 +714,8 @@ select.form-input {
 
 .history-icon.success { background: rgba(16, 185, 129, 0.15); color: var(--success); }
 .history-icon.pending { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+.history-icon.profit { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+.history-icon.danger { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
 
 .history-details h4 { font-size: 0.875rem; font-weight: 600; margin-bottom: 0.125rem; }
 .history-details span { font-size: 0.75rem; color: var(--text-muted); }

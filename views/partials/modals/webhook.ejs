@@ -13,6 +13,7 @@
                 </div>
                 <p class="form-hint">将此URL填入TradingView警报的Webhook URL字段</p>
             </div>
+            
             <div class="webhook-test-section">
                 <label class="form-label">Webhook 状态</label>
                 <div class="webhook-status-box" id="webhookStatusBox">
@@ -20,7 +21,28 @@
                     <span id="webhookConnectionText">等待连接...</span>
                 </div>
             </div>
+            
+            <!-- Webhook 统计 -->
+            <div class="webhook-stats-section" style="margin-top: 1.5rem;">
+                <label class="form-label">接收统计</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div style="background: var(--bg-tertiary); padding: 0.75rem; border-radius: 8px; text-align: center;">
+                        <div id="webhookTotalReceived" style="font-size: 1.5rem; font-weight: 600; color: var(--accent-cyan);">0</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">总接收次数</div>
+                    </div>
+                    <div style="background: var(--bg-tertiary); padding: 0.75rem; border-radius: 8px; text-align: center;">
+                        <div id="webhookSuccessRate" style="font-size: 1.5rem; font-weight: 600; color: var(--success);">--</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">成功率</div>
+                    </div>
+                </div>
+                <div style="margin-top: 0.75rem; font-size: 0.75rem; color: var(--text-muted);">
+                    <span>最后接收: </span>
+                    <span id="webhookLastReceived">--</span>
+                </div>
+            </div>
+            
             <button class="btn-primary" style="width: 100%; margin-top: 1.5rem;" onclick="regenerateWebhook()">重新生成 Webhook URL</button>
+            <p class="form-hint" style="text-align: center; margin-top: 0.5rem;">⚠️ 重新生成后，旧的 URL 将立即失效</p>
         </div>
     </div>
 </div>

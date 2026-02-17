@@ -200,6 +200,9 @@ async function handleLogin() {
         // 获取用户配置
         await loadUserWebhook();
         await loadExchangeConfig();
+        await fetchConfigs();
+        await fetchPositions();
+        await fetchActivities();
 
         updateUIState();
         closeModal('loginModal');
@@ -282,9 +285,14 @@ async function loadUserWebhook() {
             webhookConfig = {
                 url: result.data.url,
                 token: result.data.token,
+                status: result.data.status,
+                lastReceived: result.data.lastReceived,
+                totalReceived: result.data.totalReceived,
+                stats: result.data.stats,
                 createdAt: result.data.createdAt
             };
             localStorage.setItem('tvtrade_webhook', JSON.stringify(webhookConfig));
+            updateUIState();
         }
     } catch (error) {
         console.error('加载Webhook失败:', error);
@@ -303,11 +311,16 @@ async function handleLogout() {
         console.error('Logout error:', error);
     }
 
-    // 清除所有本地数据（用户、Token、交易所配置、Webhook配置）
+    // 清除所有本地数据（用户、Token、交易所配置、Webhook配置、已保存配置、持仓、活动记录）
     currentUser = null;
     authToken = null;
     exchangeConfig = null;
     webhookConfig = null;
+    savedConfigs = [];
+    activeConfigId = null;
+    positions = [];
+    currentPosition = null;
+    activities = [];
     
     localStorage.removeItem('tvtrade_user');
     localStorage.removeItem('tvtrade_token');
@@ -315,6 +328,9 @@ async function handleLogout() {
     localStorage.removeItem('tvtrade_webhook');
     
     updateUIState();
+    renderSavedConfigs();
+    renderPositions();
+    renderActivities();
     showToast('已退出登录', 'success');
 }
 
@@ -684,6 +700,143 @@ async function refreshBalance() {
     }
 }
 
+// 获取用户保存的配置
+async function fetchConfigs() {
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        savedConfigs = [];
+        renderSavedConfigs();
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/configs', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            savedConfigs = result.data || [];
+            renderSavedConfigs();
+        } else {
+            console.error('Fetch configs error:', result.error);
+            savedConfigs = [];
+            renderSavedConfigs();
+        }
+    } catch (error) {
+        console.error('Fetch configs error:', error);
+        savedConfigs = [];
+        renderSavedConfigs();
+    }
+}
+
+// 获取用户持仓
+async function fetchPositions() {
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        positions = [];
+        renderPositions();
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/positions', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            positions = result.data || [];
+            renderPositions();
+        } else {
+            console.error('Fetch positions error:', result.error);
+            positions = [];
+            renderPositions();
+        }
+    } catch (error) {
+        console.error('Fetch positions error:', error);
+        positions = [];
+        renderPositions();
+    }
+}
+
+// 同步交易所持仓
+async function syncPositions() {
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        showToast('请先登录', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/positions/sync', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            positions = result.data || [];
+            renderPositions();
+            showToast('持仓同步完成', 'success');
+        } else {
+            showToast(result.error?.message || '同步失败', 'error');
+        }
+    } catch (error) {
+        console.error('Sync positions error:', error);
+        showToast('同步持仓失败', 'error');
+    }
+}
+
+// 平仓
+async function closePosition(positionId, closePercent = 100) {
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        showToast('请先登录', 'error');
+        return;
+    }
+    
+    if (!confirm(`确定要平仓 ${closePercent}% 吗？`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/positions/${positionId}/close`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ closePercent, orderType: 'market' })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            await fetchPositions();
+            const pnlText = result.data.realizedPnl >= 0 
+                ? `+$${result.data.realizedPnl}` 
+                : `-$${Math.abs(result.data.realizedPnl)}`;
+            showToast(`平仓成功! ${pnlText}`, result.data.realizedPnl >= 0 ? 'success' : 'error');
+            addActivity('position_closed', `平仓 ${result.data.symbol} ${closePercent}%`, result.data.symbol, result.data.realizedPnl);
+        } else {
+            showToast(result.error?.message || '平仓失败', 'error');
+        }
+    } catch (error) {
+        console.error('Close position error:', error);
+        showToast('平仓失败', 'error');
+    }
+}
+
 // 删除交易所配置
 async function deleteExchangeConfig() {
     if (!exchangeConfig || !exchangeConfig.id) {
@@ -849,6 +1002,10 @@ function updateUIState() {
     }
 
     // Webhook状态
+    const webhookTotalReceived = document.getElementById('webhookTotalReceived');
+    const webhookSuccessRate = document.getElementById('webhookSuccessRate');
+    const webhookLastReceived = document.getElementById('webhookLastReceived');
+    
     if (webhookConfig) {
         webhookStatus.textContent = 'Webhook 已配置';
         webhookDot.style.background = 'var(--success)';
@@ -856,7 +1013,30 @@ function updateUIState() {
         if (webhookUrlInput) webhookUrlInput.value = webhookConfig.url;
         webhookIndicator.classList.add('connected');
         webhookIndicator.classList.remove('disconnected');
-        webhookConnectionText.textContent = '连接正常';
+        webhookConnectionText.textContent = webhookConfig.status === 'active' ? '连接正常' : '已暂停';
+        
+        // 更新统计信息
+        if (webhookTotalReceived) {
+            webhookTotalReceived.textContent = webhookConfig.totalReceived || 0;
+        }
+        if (webhookSuccessRate && webhookConfig.stats) {
+            const total = (webhookConfig.stats.successCount || 0) + (webhookConfig.stats.failCount || 0);
+            if (total > 0) {
+                const rate = Math.round((webhookConfig.stats.successCount / total) * 100);
+                webhookSuccessRate.textContent = rate + '%';
+                webhookSuccessRate.style.color = rate >= 80 ? 'var(--success)' : rate >= 50 ? 'var(--warning)' : 'var(--danger)';
+            } else {
+                webhookSuccessRate.textContent = '--';
+            }
+        }
+        if (webhookLastReceived) {
+            if (webhookConfig.lastReceived) {
+                const lastTime = new Date(webhookConfig.lastReceived);
+                webhookLastReceived.textContent = formatRelativeTime(lastTime);
+            } else {
+                webhookLastReceived.textContent = '暂无';
+            }
+        }
     } else {
         webhookStatus.textContent = 'Webhook 未配置';
         webhookDot.style.background = 'var(--text-muted)';
@@ -864,6 +1044,9 @@ function updateUIState() {
         webhookIndicator.classList.remove('connected');
         webhookIndicator.classList.add('disconnected');
         webhookConnectionText.textContent = '等待登录...';
+        if (webhookTotalReceived) webhookTotalReceived.textContent = '0';
+        if (webhookSuccessRate) webhookSuccessRate.textContent = '--';
+        if (webhookLastReceived) webhookLastReceived.textContent = '--';
     }
 
     // 交易所状态
@@ -911,23 +1094,15 @@ let tpIdCounter = 4;
 let slIdCounter = 2;
 
 // 已保存的配置
-let savedConfigs = JSON.parse(localStorage.getItem('tvtrade_configs') || '[]');
-let configIdCounter = savedConfigs.length > 0 ? Math.max(...savedConfigs.map(c => c.id)) + 1 : 1;
+let savedConfigs = [];
 let activeConfigId = null;
 
 // 活动历史
 let activities = JSON.parse(localStorage.getItem('tvtrade_activities') || '[]');
 
-// 模拟持仓数据
-let currentPosition = {
-    symbol: 'BTCUSDT',
-    direction: 'long',
-    leverage: 20,
-    entryPrice: 42150.50,
-    currentPrice: 43285.20,
-    quantity: 0.156,
-    margin: 328.50
-};
+// 持仓数据
+let positions = [];
+let currentPosition = null; // 当前选中/显示的持仓
 
 // Slider value display
 document.querySelectorAll('.slider').forEach(slider => {
@@ -1318,38 +1493,70 @@ function updateSummary(settings) {
 
 // ==================== 保存配置功能 ====================
 
-function saveCurrentConfig() {
+async function saveCurrentConfig() {
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        showToast('请先登录', 'error');
+        return;
+    }
+    
     const settings = getSettings();
-    const totalPositionSize = entries.reduce((sum, e) => sum + parseInt(e.positionSize || 0), 0);
     const configName = `${settings.symbol} ${settings.direction === 'long' ? '做多' : '做空'} ${settings.leverage}x`;
     
-    const config = {
-        id: configIdCounter++,
+    const configData = {
         name: configName,
         symbol: settings.symbol,
         direction: settings.direction,
-        leverage: settings.leverage,
-        entries: JSON.parse(JSON.stringify(entries)),
-        takeProfits: JSON.parse(JSON.stringify(takeProfits)),
-        stopLosses: JSON.parse(JSON.stringify(stopLosses)),
+        leverage: parseInt(settings.leverage),
+        entries: entries.map(e => ({
+            positionSize: e.positionSize,
+            orderType: e.orderType,
+            enabled: e.enabled
+        })),
+        takeProfits: takeProfits.map(tp => ({
+            closePercent: tp.closePercent,
+            orderType: tp.orderType,
+            enabled: tp.enabled
+        })),
+        stopLosses: stopLosses.map(sl => ({
+            closePercent: sl.closePercent,
+            orderType: sl.orderType,
+            enabled: sl.enabled
+        })),
         protectionSL: document.getElementById('protectionSL')?.checked || false,
-        protectionOrderType: document.querySelector('#protectionOrderType .mini-toggle-btn.active')?.dataset.type || 'market',
-        createdAt: new Date().toISOString()
+        protectionOrderType: document.querySelector('#protectionOrderType .mini-toggle-btn.active')?.dataset.type || 'market'
     };
     
-    savedConfigs.unshift(config);
-    localStorage.setItem('tvtrade_configs', JSON.stringify(savedConfigs));
-    
-    addActivity('config_saved', `保存配置: ${configName}`, settings.symbol);
-    renderSavedConfigs();
-    showToast('配置已保存', 'success');
+    try {
+        const response = await fetch('/api/configs', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(configData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            await fetchConfigs();
+            addActivity('config_saved', `保存配置: ${configName}`, settings.symbol);
+            showToast('配置已保存', 'success');
+        } else {
+            showToast(result.error?.message || '保存失败', 'error');
+        }
+    } catch (error) {
+        console.error('Save config error:', error);
+        showToast('保存配置失败', 'error');
+    }
 }
 
 function loadConfig(id) {
-    const config = savedConfigs.find(c => c.id === id);
+    const config = savedConfigs.find(c => c._id === id || c.id === id);
     if (!config) return;
     
-    activeConfigId = id;
+    activeConfigId = config._id || config.id;
     
     document.querySelector('select').value = config.symbol;
     
@@ -1366,23 +1573,37 @@ function loadConfig(id) {
     
     // 加载开仓配置（兼容旧配置）
     if (config.entries && config.entries.length > 0) {
-        entries = JSON.parse(JSON.stringify(config.entries));
+        entries = config.entries.map((e, idx) => ({
+            id: e._id || idx + 1,
+            positionSize: e.positionSize || '30',
+            orderType: e.orderType || 'market',
+            enabled: e.enabled !== false
+        }));
     } else {
         // 兼容旧配置：使用旧的 positionSize 和 orderType
         entries = [{
             id: 1,
-            positionSize: config.positionSize || '30',
+            positionSize: config.positionSize?.toString() || '30',
             orderType: config.orderType || 'market',
-            price: '',
             enabled: true
         }];
     }
-    entryIdCounter = Math.max(...entries.map(e => e.id), 0) + 1;
+    entryIdCounter = Math.max(...entries.map(e => e.id || 0), 0) + 1;
     
-    takeProfits = JSON.parse(JSON.stringify(config.takeProfits));
-    stopLosses = JSON.parse(JSON.stringify(config.stopLosses));
-    tpIdCounter = Math.max(...takeProfits.map(t => t.id), 0) + 1;
-    slIdCounter = Math.max(...stopLosses.map(s => s.id), 0) + 1;
+    takeProfits = config.takeProfits.map((tp, idx) => ({
+        id: tp._id || idx + 1,
+        closePercent: tp.closePercent,
+        orderType: tp.orderType || 'market',
+        enabled: tp.enabled !== false
+    }));
+    stopLosses = config.stopLosses.map((sl, idx) => ({
+        id: sl._id || idx + 1,
+        closePercent: sl.closePercent,
+        orderType: sl.orderType || 'market',
+        enabled: sl.enabled !== false
+    }));
+    tpIdCounter = Math.max(...takeProfits.map(t => t.id || 0), 0) + 1;
+    slIdCounter = Math.max(...stopLosses.map(s => s.id || 0), 0) + 1;
     
     const protectionCheckbox = document.getElementById('protectionSL');
     if (protectionCheckbox) protectionCheckbox.checked = config.protectionSL || false;
@@ -1392,32 +1613,78 @@ function loadConfig(id) {
     renderTakeProfits();
     renderStopLosses();
     renderSavedConfigs();
-    updatePosition();
     
     addActivity('config_loaded', `加载配置: ${config.name}`, config.symbol);
     showToast(`已加载: ${config.name}`, 'success');
 }
 
-function deleteConfig(id, e) {
+async function deleteConfig(id, e) {
     e.stopPropagation();
-    const config = savedConfigs.find(c => c.id === id);
-    savedConfigs = savedConfigs.filter(c => c.id !== id);
-    localStorage.setItem('tvtrade_configs', JSON.stringify(savedConfigs));
     
-    if (activeConfigId === id) activeConfigId = null;
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        showToast('请先登录', 'error');
+        return;
+    }
     
-    renderSavedConfigs();
-    addActivity('config_deleted', `删除配置: ${config?.name || '未知'}`, config?.symbol || '');
-    showToast('配置已删除', 'success');
+    const config = savedConfigs.find(c => c._id === id || c.id === id);
+    const configId = config?._id || id;
+    
+    try {
+        const response = await fetch(`/api/configs/${configId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            if (activeConfigId === configId) activeConfigId = null;
+            await fetchConfigs();
+            addActivity('config_deleted', `删除配置: ${config?.name || '未知'}`, config?.symbol || '');
+            showToast('配置已删除', 'success');
+        } else {
+            showToast(result.error?.message || '删除失败', 'error');
+        }
+    } catch (error) {
+        console.error('Delete config error:', error);
+        showToast('删除配置失败', 'error');
+    }
 }
 
-function clearAllConfigs() {
+async function clearAllConfigs() {
     if (savedConfigs.length === 0) return;
-    savedConfigs = [];
-    localStorage.setItem('tvtrade_configs', JSON.stringify(savedConfigs));
-    activeConfigId = null;
-    renderSavedConfigs();
-    showToast('已清空所有配置', 'success');
+    
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        showToast('请先登录', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/configs', {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            savedConfigs = [];
+            activeConfigId = null;
+            renderSavedConfigs();
+            showToast(`已清空所有配置 (${result.deletedCount}个)`, 'success');
+        } else {
+            showToast(result.error?.message || '清空失败', 'error');
+        }
+    } catch (error) {
+        console.error('Clear configs error:', error);
+        showToast('清空配置失败', 'error');
+    }
 }
 
 function renderSavedConfigs() {
@@ -1428,39 +1695,131 @@ function renderSavedConfigs() {
         return;
     }
     
-    container.innerHTML = savedConfigs.map(config => `
-        <div class="config-item ${activeConfigId === config.id ? 'active' : ''}" onclick="loadConfig(${config.id})">
+    container.innerHTML = savedConfigs.map(config => {
+        const configId = config._id || config.id;
+        const entryCount = config.entries?.length || 1;
+        const tpCount = config.takeProfits?.length || 0;
+        const slCount = config.stopLosses?.length || 0;
+        
+        return `
+        <div class="config-item ${activeConfigId === configId ? 'active' : ''}" onclick="loadConfig('${configId}')">
             <div>
                 <span class="config-name">${config.name}</span>
                 <div style="font-size: 0.65rem; color: var(--text-muted); margin-top: 0.25rem;">
-                    ${config.takeProfits.length}个止盈 · ${config.stopLosses.length}个止损
+                    ${entryCount}个开仓 · ${tpCount}个止盈 · ${slCount}个止损
                 </div>
             </div>
             <div class="config-item-actions">
                 <span class="config-type ${config.direction === 'long' ? 'open' : 'sl'}">${config.direction === 'long' ? '做多' : '做空'}</span>
-                <button class="config-delete-btn" onclick="deleteConfig(${config.id}, event)">×</button>
+                <button class="config-delete-btn" onclick="deleteConfig('${configId}', event)">×</button>
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 // ==================== 活动记录功能 ====================
 
-function addActivity(type, title, symbol, amount = null) {
-    const activity = { id: Date.now(), type, title, symbol, amount, time: new Date().toISOString() };
+// 获取活动记录
+async function fetchActivities() {
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        activities = [];
+        renderActivities();
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/activities?limit=20', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            activities = result.data || [];
+            renderActivities();
+        } else {
+            console.error('Fetch activities error:', result.error);
+            activities = [];
+            renderActivities();
+        }
+    } catch (error) {
+        console.error('Fetch activities error:', error);
+        activities = [];
+        renderActivities();
+    }
+}
+
+// 添加活动记录
+async function addActivity(type, title, symbol, amount = null) {
+    const token = localStorage.getItem('tvtrade_token');
+    
+    // 本地立即添加（乐观更新）
+    const activity = { 
+        _id: Date.now().toString(), 
+        type, 
+        title, 
+        symbol, 
+        amount, 
+        createdAt: new Date().toISOString() 
+    };
     activities.unshift(activity);
     if (activities.length > 20) activities = activities.slice(0, 20);
-    localStorage.setItem('tvtrade_activities', JSON.stringify(activities));
     renderActivities();
+    
+    // 如果已登录，同步到服务器
+    if (token) {
+        try {
+            await fetch('/api/activities', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ type, title, symbol, amount })
+            });
+        } catch (error) {
+            console.error('Add activity error:', error);
+        }
+    }
 }
 
-function clearActivities() {
-    activities = [];
-    localStorage.setItem('tvtrade_activities', JSON.stringify(activities));
-    renderActivities();
-    showToast('已清空活动记录', 'success');
+// 清空活动记录
+async function clearActivities() {
+    const token = localStorage.getItem('tvtrade_token');
+    
+    if (token) {
+        try {
+            const response = await fetch('/api/activities', {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                activities = [];
+                renderActivities();
+                showToast(`已清空活动记录 (${result.deletedCount}条)`, 'success');
+            } else {
+                showToast(result.error?.message || '清空失败', 'error');
+            }
+        } catch (error) {
+            console.error('Clear activities error:', error);
+            showToast('清空活动记录失败', 'error');
+        }
+    } else {
+        activities = [];
+        renderActivities();
+        showToast('已清空活动记录', 'success');
+    }
 }
 
+// 渲染活动记录
 function renderActivities() {
     const container = document.getElementById('activityList');
     
@@ -1470,9 +1829,9 @@ function renderActivities() {
     }
     
     container.innerHTML = activities.slice(0, 5).map(activity => {
-        const timeAgo = getTimeAgo(activity.time);
-        const iconClass = activity.type.includes('saved') || activity.type.includes('loaded') ? 'success' : activity.type.includes('deleted') ? 'pending' : 'success';
-        const icon = activity.type.includes('saved') ? '✓' : activity.type.includes('loaded') ? '↓' : activity.type.includes('deleted') ? '×' : '✓';
+        const timeAgo = getTimeAgo(activity.createdAt || activity.time);
+        const iconClass = getActivityIconClass(activity.type);
+        const icon = getActivityIcon(activity.type);
         
         return `
             <div class="history-item">
@@ -1480,16 +1839,57 @@ function renderActivities() {
                     <div class="history-icon ${iconClass}">${icon}</div>
                     <div class="history-details">
                         <h4>${activity.title}</h4>
-                        <span>${activity.symbol} · ${timeAgo}</span>
+                        <span>${activity.symbol || ''} · ${timeAgo}</span>
                     </div>
                 </div>
-                ${activity.amount ? `<span class="history-amount ${activity.amount > 0 ? 'profit' : ''}">${activity.amount > 0 ? '+' : ''}$${Math.abs(activity.amount).toFixed(2)}</span>` : ''}
+                ${activity.amount != null ? `<span class="history-amount ${activity.amount >= 0 ? 'profit' : ''}">${activity.amount >= 0 ? '+' : ''}$${Math.abs(activity.amount).toFixed(2)}</span>` : ''}
             </div>
         `;
     }).join('');
 }
 
+// 获取活动图标样式
+function getActivityIconClass(type) {
+    switch (type) {
+        case 'config_saved':
+        case 'config_loaded':
+        case 'position_opened':
+        case 'order_executed':
+        case 'exchange_connected':
+            return 'success';
+        case 'tp_triggered':
+            return 'profit';
+        case 'sl_triggered':
+        case 'order_failed':
+        case 'position_closed':
+            return 'danger';
+        case 'config_deleted':
+            return 'pending';
+        default:
+            return 'success';
+    }
+}
+
+// 获取活动图标
+function getActivityIcon(type) {
+    switch (type) {
+        case 'config_saved': return '✓';
+        case 'config_loaded': return '↓';
+        case 'config_deleted': return '×';
+        case 'tp_triggered': return '💰';
+        case 'sl_triggered': return '🛑';
+        case 'position_opened': return '📈';
+        case 'position_closed': return '📉';
+        case 'order_executed': return '✓';
+        case 'order_failed': return '!';
+        case 'exchange_connected': return '🔗';
+        case 'webhook_received': return '📡';
+        default: return '•';
+    }
+}
+
 function getTimeAgo(isoTime) {
+    if (!isoTime) return '';
     const now = new Date();
     const time = new Date(isoTime);
     const diff = Math.floor((now - time) / 1000);
@@ -1502,81 +1902,99 @@ function getTimeAgo(isoTime) {
 
 // ==================== 持仓显示功能 ====================
 
-function updatePosition() {
-    const settings = getSettings();
+// 渲染持仓列表（从 API 获取的真实持仓）
+function renderPositions() {
     const container = document.getElementById('positionBody');
     const card = document.getElementById('positionCard');
     
-    currentPosition.symbol = settings.symbol;
-    currentPosition.direction = settings.direction;
-    currentPosition.leverage = parseInt(settings.leverage);
+    if (!container || !card) return;
     
-    const prices = {
-        'BTCUSDT': { entry: 42150.50, current: 43285.20 },
-        'ETHUSDT': { entry: 2250.30, current: 2312.45 },
-        'BNBUSDT': { entry: 310.20, current: 318.60 },
-        'SOLUSDT': { entry: 98.50, current: 102.30 },
-        'XRPUSDT': { entry: 0.52, current: 0.54 }
-    };
+    // 如果有真实持仓，显示第一个
+    if (positions.length > 0) {
+        const pos = positions[0];
+        currentPosition = pos;
+        
+        const pnl = pos.unrealizedPnl || 0;
+        const pnlPercent = pos.unrealizedPnlPercent || 0;
+        const isProfit = pnl >= 0;
+        
+        card.className = `card position-card ${isProfit ? '' : 'loss'}`;
+        
+        container.innerHTML = `
+            <div class="position-header">
+                <span class="position-symbol">${pos.symbol}</span>
+                <span class="position-badge ${pos.direction}">${pos.direction.toUpperCase()} ${pos.leverage}x</span>
+                <button class="mini-action-btn" onclick="syncPositions()" style="margin-left: auto; padding: 0.25rem 0.5rem; font-size: 0.7rem;">🔄 同步</button>
+            </div>
+            <div class="position-stats">
+                <div class="stat-item"><div class="stat-label">开仓价格</div><div class="stat-value">$${pos.entryPrice?.toLocaleString() || '--'}</div></div>
+                <div class="stat-item"><div class="stat-label">当前价格</div><div class="stat-value ${isProfit ? 'profit' : 'loss'}">$${pos.currentPrice?.toLocaleString() || '--'}</div></div>
+                <div class="stat-item"><div class="stat-label">持仓数量</div><div class="stat-value">${pos.quantity || 0} ${pos.symbol?.replace('USDT', '') || ''}</div></div>
+                <div class="stat-item"><div class="stat-label">保证金</div><div class="stat-value">$${pos.margin?.toFixed(2) || '0.00'}</div></div>
+            </div>
+            <div class="pnl-display">
+                <div class="pnl-label">未实现盈亏</div>
+                <div class="pnl-value ${isProfit ? 'profit' : 'loss'}">${isProfit ? '+' : ''}$${pnl.toFixed(2)}</div>
+                <div class="pnl-percent ${isProfit ? 'profit' : 'loss'}">${isProfit ? '+' : ''}${pnlPercent.toFixed(2)}%</div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 1rem;">
+                <button class="mini-action-btn" onclick="closePosition('${pos._id}', 50)">平仓 50%</button>
+                <button class="mini-action-btn danger" onclick="closePosition('${pos._id}', 100)">全部平仓</button>
+            </div>
+            ${positions.length > 1 ? `<div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.5rem; text-align: center;">还有 ${positions.length - 1} 个持仓</div>` : ''}
+        `;
+    } else {
+        // 没有真实持仓，显示模拟/预览
+        updatePosition();
+    }
+}
+
+// 显示空持仓状态
+function updatePosition() {
+    const container = document.getElementById('positionBody');
+    const card = document.getElementById('positionCard');
     
-    const priceData = prices[settings.symbol] || prices['BTCUSDT'];
-    currentPosition.entryPrice = priceData.entry;
-    currentPosition.currentPrice = priceData.current;
+    if (!container || !card) return;
     
-    const priceChange = settings.direction === 'long' 
-        ? (currentPosition.currentPrice - currentPosition.entryPrice) / currentPosition.entryPrice
-        : (currentPosition.entryPrice - currentPosition.currentPrice) / currentPosition.entryPrice;
+    // 如果有真实持仓，使用 renderPositions
+    if (positions.length > 0) {
+        renderPositions();
+        return;
+    }
     
-    const pnlPercent = priceChange * currentPosition.leverage * 100;
-    const pnlAmount = currentPosition.margin * priceChange * currentPosition.leverage;
-    const isProfit = pnlAmount >= 0;
-    
-    card.className = `card position-card ${isProfit ? '' : 'loss'}`;
+    // 没有持仓时显示空状态，但根据当前选择的方向设置颜色
+    const settings = getSettings();
+    const isLong = settings.direction === 'long';
+    card.className = `card position-card ${isLong ? '' : 'loss'}`;
     
     container.innerHTML = `
-        <div class="position-header">
-            <span class="position-symbol">${currentPosition.symbol}</span>
-            <span class="position-badge ${settings.direction}">${settings.direction.toUpperCase()} ${settings.leverage}x</span>
-        </div>
-        <div class="position-stats">
-            <div class="stat-item"><div class="stat-label">开仓价格</div><div class="stat-value">$${currentPosition.entryPrice.toLocaleString()}</div></div>
-            <div class="stat-item"><div class="stat-label">当前价格</div><div class="stat-value ${isProfit ? 'profit' : 'loss'}">$${currentPosition.currentPrice.toLocaleString()}</div></div>
-            <div class="stat-item"><div class="stat-label">持仓数量</div><div class="stat-value">${currentPosition.quantity} ${settings.symbol.replace('USDT', '')}</div></div>
-            <div class="stat-item"><div class="stat-label">保证金</div><div class="stat-value">$${currentPosition.margin.toFixed(2)}</div></div>
-        </div>
-        <div class="pnl-display">
-            <div class="pnl-label">未实现盈亏</div>
-            <div class="pnl-value ${isProfit ? 'profit' : 'loss'}">${isProfit ? '+' : ''}$${pnlAmount.toFixed(2)}</div>
-            <div class="pnl-percent ${isProfit ? 'profit' : 'loss'}">${isProfit ? '+' : ''}${pnlPercent.toFixed(2)}%</div>
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 1rem;">
-            <button class="mini-action-btn" onclick="simulateTakeProfit()">模拟止盈</button>
-            <button class="mini-action-btn danger" onclick="simulateStopLoss()">模拟止损</button>
+        <div class="empty-state" style="padding: 2rem 1rem;">
+            <div class="empty-state-icon">📊</div>
+            <div style="color: var(--text-muted); margin-bottom: 0.5rem;">暂无持仓</div>
+            <div style="font-size: 0.7rem; color: var(--text-muted);">开始交易后，持仓信息将在此显示</div>
         </div>
     `;
 }
 
-function simulateTakeProfit() {
-    const settings = getSettings();
-    const tp = takeProfits.find(t => t.enabled);
-    if (!tp) { showToast('没有启用的止盈配置', 'error'); return; }
-    
-    const amount = currentPosition.margin * 0.05 * currentPosition.leverage * (parseFloat(tp.closePercent) / 100);
-    addActivity('tp_triggered', `止盈触发 平${tp.closePercent}%仓`, settings.symbol, amount);
-    showToast(`止盈触发! 平${tp.closePercent}%仓 +$${amount.toFixed(2)}`, 'success');
-}
-
-function simulateStopLoss() {
-    const settings = getSettings();
-    const sl = stopLosses.find(s => s.enabled);
-    if (!sl) { showToast('没有启用的止损配置', 'error'); return; }
-    
-    const amount = -currentPosition.margin * 0.03 * currentPosition.leverage * (parseFloat(sl.closePercent) / 100);
-    addActivity('sl_triggered', `止损触发 平${sl.closePercent}%仓`, settings.symbol, amount);
-    showToast(`止损触发! 平${sl.closePercent}%仓 -$${Math.abs(amount).toFixed(2)}`, 'error');
-}
+// 模拟函数已移除 - 持仓通过 Webhook 实际交易产生
 
 // ==================== 工具函数 ====================
+
+// 格式化相对时间
+function formatRelativeTime(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (seconds < 60) return '刚刚';
+    if (minutes < 60) return `${minutes}分钟前`;
+    if (hours < 24) return `${hours}小时前`;
+    if (days < 7) return `${days}天前`;
+    return date.toLocaleDateString('zh-CN');
+}
 
 function copyWebhookUrl() {
     const url = document.getElementById('webhookUrl').value;
@@ -1605,22 +2023,21 @@ validateSession().then(() => {
     if (currentUser && authToken) {
         loadUserWebhook();
         loadExchangeConfig();
+        fetchConfigs();
+        fetchPositions();
+        fetchActivities();
     }
 });
 
 renderEntries();
 renderTakeProfits();
 renderStopLosses();
-renderSavedConfigs();
+renderSavedConfigs(); // 初始渲染空列表，登录后会通过 fetchConfigs 更新
 renderActivities();
-updatePosition();
+renderPositions(); // 初始渲染空状态，登录后会通过 fetchPositions 更新
 updateUIState();
 
-// 监听设置变化更新持仓
-document.querySelectorAll('.toggle-group').forEach(group => {
-    group.addEventListener('click', () => setTimeout(updatePosition, 50));
+// 监听方向切换，更新持仓卡片颜色
+document.querySelectorAll('.toggle-group')[0]?.addEventListener('click', () => {
+    setTimeout(updatePosition, 50);
 });
-document.querySelectorAll('.slider').forEach(slider => {
-    slider.addEventListener('input', () => setTimeout(updatePosition, 50));
-});
-document.querySelector('select').addEventListener('change', () => setTimeout(updatePosition, 50));

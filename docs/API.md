@@ -469,16 +469,18 @@ Authorization: Bearer <token>
       "name": "BTCUSDT 做多 20x",
       "symbol": "BTCUSDT",
       "direction": "long",
-      "orderType": "market",
       "leverage": 20,
-      "positionSize": 30,
+      "entries": [
+        { "positionSize": "30", "orderType": "market", "enabled": true },
+        { "positionSize": "20", "orderType": "limit", "enabled": true }
+      ],
       "takeProfits": [
-        { "id": 1, "closePercent": "50", "orderType": "market", "enabled": true },
-        { "id": 2, "closePercent": "30", "orderType": "market", "enabled": true },
-        { "id": 3, "closePercent": "20", "orderType": "market", "enabled": true }
+        { "closePercent": "50", "orderType": "market", "enabled": true },
+        { "closePercent": "30", "orderType": "market", "enabled": true },
+        { "closePercent": "20", "orderType": "market", "enabled": true }
       ],
       "stopLosses": [
-        { "id": 1, "closePercent": "100", "orderType": "market", "enabled": true }
+        { "closePercent": "100", "orderType": "market", "enabled": true }
       ],
       "protectionSL": true,
       "protectionOrderType": "market",
@@ -509,9 +511,8 @@ Authorization: Bearer <token>
     "name": "BTCUSDT 做多 20x",
     "symbol": "BTCUSDT",
     "direction": "long",
-    "orderType": "market",
     "leverage": 20,
-    "positionSize": 30,
+    "entries": [...],
     "takeProfits": [...],
     "stopLosses": [...],
     "protectionSL": true,
@@ -533,9 +534,11 @@ Authorization: Bearer <token>
   "name": "BTCUSDT 做多 20x",
   "symbol": "BTCUSDT",
   "direction": "long",
-  "orderType": "market",
   "leverage": 20,
-  "positionSize": 30,
+  "entries": [
+    { "positionSize": "30", "orderType": "market", "enabled": true },
+    { "positionSize": "20", "orderType": "limit", "enabled": true }
+  ],
   "takeProfits": [
     { "closePercent": "50", "orderType": "market", "enabled": true },
     { "closePercent": "30", "orderType": "market", "enabled": true },
@@ -568,11 +571,18 @@ PUT /api/configs/:id
 Authorization: Bearer <token>
 ```
 
-**Request Body:**
+**Request Body (可选字段):**
 ```json
 {
+  "name": "新配置名称",
   "leverage": 25,
-  "positionSize": 40
+  "entries": [
+    { "positionSize": "40", "orderType": "market", "enabled": true }
+  ],
+  "takeProfits": [...],
+  "stopLosses": [...],
+  "protectionSL": false,
+  "protectionOrderType": "limit"
 }
 ```
 
@@ -582,8 +592,9 @@ Authorization: Bearer <token>
   "success": true,
   "data": {
     "id": "cfg_001",
+    "name": "新配置名称",
     "leverage": 25,
-    "positionSize": 40,
+    "entries": [...],
     "updatedAt": "2026-01-26T11:00:00Z"
   }
 }
