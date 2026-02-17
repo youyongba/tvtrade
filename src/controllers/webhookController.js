@@ -1,5 +1,5 @@
 const { User, Webhook, Order, Position, Exchange, Activity } = require('../models');
-const { openPosition, closePosition, getPrice } = require('../utils/exchangeClient');
+const { openPosition, closePosition, getPrice, placeProtectionStopLoss } = require('../utils/exchangeClient');
 
 /**
  * @desc    获取当前用户的 Webhook 配置
@@ -146,7 +146,7 @@ exports.receiveWebhook = async (req, res) => {
 
     // 3. 解析并验证消息
     const { 
-      action,           // open_long, open_short, close_long, close_short, protection_sl
+      action,           // open_long, open_short, close_long, close_short, protection_sl, take_profit, stop_loss
       symbol,           // BTCUSDT
       leverage,         // 20
       position_size,    // "30%"
@@ -154,7 +154,11 @@ exports.receiveWebhook = async (req, res) => {
       order_type,       // market, limit
       entry_index,      // 1, 2, 3...
       tp_index,         // 止盈索引
-      sl_index          // 止损索引
+      sl_index,         // 止损索引
+      // 保护性止损相关字段
+      set_protection_sl,        // true/false - 是否在止盈后挂保护性止损
+      protection_sl_price,      // "entry_price" - 止损价格（开仓价）
+      protection_sl_order_type  // "market" - 止损订单类型
     } = payload;
 
     if (!action || !symbol) {
@@ -403,6 +407,66 @@ exports.receiveWebhook = async (req, res) => {
           `${tp_index ? '止盈' : '止损'}触发 平${closeSize}%仓`, 
           { symbol, amount: Math.round(pnl * 100) / 100 }
         );
+
+        // ========== 保护性止损逻辑 ==========
+        // 如果是止盈触发且设置了保护性止损，在开仓价挂止损单
+        if (set_protection_sl === true && (action === 'take_profit' || tp_index)) {
+          // 检查是否还有剩余持仓需要保护
+          if (position.status === 'open' && position.quantity > 0) {
+            console.log('\n🛡️  止盈触发，准备挂保护性止损单...');
+            console.log(`   剩余持仓: ${position.quantity}, 开仓价: ${position.entryPrice}`);
+            
+            try {
+              const protectionResult = await placeProtectionStopLoss(
+                exchangeConfig.exchange,
+                apiKey,
+                apiSecret,
+                passphrase,
+                {
+                  symbol: symbol.toUpperCase(),
+                  direction: position.direction,
+                  quantity: position.quantity,
+                  entryPrice: position.entryPrice,
+                  orderType: (protection_sl_order_type || 'market').toUpperCase()
+                }
+              );
+
+              // 记录保护性止损挂单成功
+              result.protectionSL = {
+                success: true,
+                orderId: protectionResult.orderId,
+                stopPrice: position.entryPrice,
+                quantity: position.quantity
+              };
+
+              console.log('✅ 保护性止损单挂单成功!');
+              
+              // 记录活动
+              await Activity.log(user._id, 'order_executed', 
+                `挂保护性止损单 @ ${position.entryPrice}`, 
+                { symbol, amount: 0 }
+              );
+
+            } catch (protectionError) {
+              console.error('❌ 挂保护性止损单失败:', protectionError.message);
+              
+              // 保护性止损失败不影响止盈的成功，但记录到结果中
+              result.protectionSL = {
+                success: false,
+                error: protectionError.message
+              };
+
+              // 记录失败活动
+              await Activity.log(user._id, 'order_failed', 
+                `挂保护性止损单失败: ${protectionError.message}`, 
+                { symbol }
+              );
+            }
+          } else {
+            console.log('⚠️  全部平仓，无需挂保护性止损单');
+          }
+        }
+        // ========== 保护性止损逻辑结束 ==========
 
       } catch (tradeError) {
         console.error('❌ 平仓失败:', tradeError.message);

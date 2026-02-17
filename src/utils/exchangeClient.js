@@ -675,11 +675,185 @@ async function getPrice(exchangeId, symbol) {
   }
 }
 
+// ==========================================================
+// 保护性止损功能
+// ==========================================================
+
+/**
+ * Binance Futures 挂止损单（STOP_MARKET）
+ * 当价格触及 stopPrice 时，以市价平仓
+ */
+async function placeBinanceStopOrder(apiKey, apiSecret, params) {
+  const config = EXCHANGE_CONFIG.binance;
+  const serverTime = await getBinanceServerTime();
+  
+  const { symbol, side, positionSide, quantity, stopPrice } = params;
+  
+  // 获取价格精度
+  const symbolInfo = await getBinanceSymbolInfo(symbol);
+  const formattedStopPrice = parseFloat(stopPrice).toFixed(symbolInfo.pricePrecision);
+  
+  let queryParams = `symbol=${symbol}&side=${side}&type=STOP_MARKET&quantity=${quantity}&stopPrice=${formattedStopPrice}&timestamp=${serverTime}&recvWindow=60000`;
+  
+  // 双向持仓模式需要 positionSide
+  if (positionSide) {
+    queryParams += `&positionSide=${positionSide}`;
+  }
+  
+  // 平仓时设置 reduceOnly（单向持仓模式）
+  // queryParams += `&reduceOnly=true`;
+  
+  const signature = createSignature(queryParams, apiSecret);
+  const url = `${config.baseUrl}/fapi/v1/order?${queryParams}&signature=${signature}`;
+  
+  console.log(`📤 Binance 挂止损单: ${side} ${symbol} ${quantity} @ STOP_MARKET 触发价=${formattedStopPrice}`);
+  
+  const data = await httpsRequest(url, {
+    method: 'POST',
+    headers: {
+      'X-MBX-APIKEY': apiKey,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+  
+  if (data.code) {
+    console.error(`❌ Binance 挂止损单失败:`, data);
+    throw new Error(data.msg || `挂止损单失败: ${data.code}`);
+  }
+  
+  console.log(`✅ Binance 止损单挂单成功:`, JSON.stringify(data));
+  
+  return {
+    success: true,
+    orderId: data.orderId,
+    clientOrderId: data.clientOrderId,
+    symbol: data.symbol,
+    side: data.side,
+    type: data.type,
+    status: data.status,
+    stopPrice: parseFloat(data.stopPrice),
+    origQty: parseFloat(data.origQty),
+    raw: data
+  };
+}
+
+/**
+ * Binance Futures 挂保护性止损单（在成本价/开仓价）
+ * @param {string} apiKey
+ * @param {string} apiSecret
+ * @param {object} params - { symbol, direction, quantity, entryPrice, orderType }
+ */
+async function placeBinanceProtectionSL(apiKey, apiSecret, params) {
+  const { symbol, direction, quantity, entryPrice, orderType = 'STOP_MARKET' } = params;
+  
+  console.log('\n' + '='.repeat(60));
+  console.log('🛡️  BINANCE FUTURES 挂保护性止损单');
+  console.log('='.repeat(60));
+  console.log(`交易对: ${symbol}, 方向: ${direction}`);
+  console.log(`数量: ${quantity}, 开仓价(止损触发价): ${entryPrice}`);
+  
+  // 平仓方向与持仓方向相反
+  const side = direction === 'long' ? 'SELL' : 'BUY';
+  const positionSide = direction === 'long' ? 'LONG' : 'SHORT';
+  
+  const result = await placeBinanceStopOrder(apiKey, apiSecret, {
+    symbol,
+    side,
+    positionSide,
+    quantity: quantity.toString(),
+    stopPrice: entryPrice
+  });
+  
+  console.log('='.repeat(60) + '\n');
+  
+  return result;
+}
+
+/**
+ * 统一挂保护性止损单接口
+ */
+async function placeProtectionStopLoss(exchangeId, apiKey, apiSecret, passphrase, params) {
+  console.log(`\n🛡️  挂保护性止损单: ${exchangeId}`);
+  
+  switch (exchangeId) {
+    case 'binance':
+      return await placeBinanceProtectionSL(apiKey, apiSecret, params);
+    case 'okx':
+      // TODO: 实现 OKX 保护性止损
+      throw new Error('OKX 保护性止损功能尚未实现');
+    case 'bybit':
+      // TODO: 实现 Bybit 保护性止损
+      throw new Error('Bybit 保护性止损功能尚未实现');
+    case 'bitget':
+      // TODO: 实现 Bitget 保护性止损
+      throw new Error('Bitget 保护性止损功能尚未实现');
+    default:
+      throw new Error(`不支持的交易所: ${exchangeId}`);
+  }
+}
+
+/**
+ * 取消所有止损单（用于平仓后清理）
+ */
+async function cancelBinanceStopOrders(apiKey, apiSecret, symbol) {
+  const config = EXCHANGE_CONFIG.binance;
+  const serverTime = await getBinanceServerTime();
+  
+  const params = `symbol=${symbol}&timestamp=${serverTime}&recvWindow=60000`;
+  const signature = createSignature(params, apiSecret);
+  
+  // 获取当前挂单
+  const openOrdersUrl = `${config.baseUrl}/fapi/v1/openOrders?${params}&signature=${signature}`;
+  const openOrders = await httpsRequest(openOrdersUrl, {
+    method: 'GET',
+    headers: { 'X-MBX-APIKEY': apiKey }
+  });
+  
+  if (openOrders.code) {
+    console.log('获取挂单失败:', openOrders);
+    return { success: false, message: openOrders.msg };
+  }
+  
+  // 筛选止损单
+  const stopOrders = openOrders.filter(o => 
+    o.type === 'STOP_MARKET' || o.type === 'STOP' || o.type === 'STOP_LOSS'
+  );
+  
+  if (stopOrders.length === 0) {
+    console.log('没有需要取消的止损单');
+    return { success: true, cancelled: 0 };
+  }
+  
+  console.log(`找到 ${stopOrders.length} 个止损单，准备取消...`);
+  
+  // 取消止损单
+  let cancelled = 0;
+  for (const order of stopOrders) {
+    const cancelParams = `symbol=${symbol}&orderId=${order.orderId}&timestamp=${await getBinanceServerTime()}&recvWindow=60000`;
+    const cancelSig = createSignature(cancelParams, apiSecret);
+    const cancelUrl = `${config.baseUrl}/fapi/v1/order?${cancelParams}&signature=${cancelSig}`;
+    
+    const cancelResult = await httpsRequest(cancelUrl, {
+      method: 'DELETE',
+      headers: { 'X-MBX-APIKEY': apiKey }
+    });
+    
+    if (!cancelResult.code) {
+      cancelled++;
+      console.log(`✅ 已取消止损单: ${order.orderId}`);
+    }
+  }
+  
+  return { success: true, cancelled };
+}
+
 module.exports = {
   testExchangeConnection,
   getBalance,
   openPosition,
   closePosition,
   getPrice,
+  placeProtectionStopLoss,
+  cancelBinanceStopOrders,
   EXCHANGE_CONFIG
 };
