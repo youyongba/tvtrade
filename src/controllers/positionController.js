@@ -1,6 +1,6 @@
 const Position = require('../models/Position');
 const Exchange = require('../models/Exchange');
-const { testExchangeConnection } = require('../utils/exchangeClient');
+const { testExchangeConnection, getPrice } = require('../utils/exchangeClient');
 
 // 获取当前持仓列表
 exports.getPositions = async (req, res) => {
@@ -12,7 +12,42 @@ exports.getPositions = async (req, res) => {
     if (status) query.status = status;
 
     const positions = await Position.find(query)
-      .sort({ openedAt: -1 });
+      .sort({ openedAt: -1 })
+      .lean(); // 使用 lean() 返回普通 JS 对象，便于修改
+
+    // 获取用户的交易所配置
+    const exchangeConfig = await Exchange.findOne({ 
+      user: req.user._id,
+      connected: true
+    });
+
+    // 如果有开仓的持仓，获取实时价格并计算盈亏
+    if (status === 'open' && positions.length > 0 && exchangeConfig) {
+      for (const pos of positions) {
+        try {
+          // 获取实时价格
+          const currentPrice = await getPrice(exchangeConfig.exchange, pos.symbol);
+          pos.currentPrice = currentPrice;
+          
+          // 手动计算未实现盈亏（因为 lean() 后没有 methods）
+          if (pos.currentPrice && pos.entryPrice) {
+            const priceDiff = pos.direction === 'long' 
+              ? pos.currentPrice - pos.entryPrice
+              : pos.entryPrice - pos.currentPrice;
+            
+            const pnlPercent = (priceDiff / pos.entryPrice) * pos.leverage * 100;
+            const pnlAmount = pos.margin * (priceDiff / pos.entryPrice) * pos.leverage;
+            
+            pos.unrealizedPnl = Math.round(pnlAmount * 100) / 100;
+            pos.unrealizedPnlPercent = Math.round(pnlPercent * 100) / 100;
+            
+            console.log(`📊 ${pos.symbol} 盈亏计算: 开仓价=${pos.entryPrice}, 当前价=${currentPrice}, PnL=$${pos.unrealizedPnl} (${pos.unrealizedPnlPercent}%)`);
+          }
+        } catch (priceError) {
+          console.error(`获取 ${pos.symbol} 价格失败:`, priceError.message);
+        }
+      }
+    }
 
     res.json({
       success: true,
@@ -161,12 +196,36 @@ exports.syncPositions = async (req, res) => {
       });
     }
 
-    // TODO: 调用交易所 API 获取实际持仓
-    // 这里先返回数据库中的持仓
+    // 获取数据库中的持仓
     const positions = await Position.find({ 
       user: req.user._id, 
       status: 'open' 
-    });
+    }).lean();
+
+    // 获取实时价格并计算盈亏
+    for (const pos of positions) {
+      try {
+        const currentPrice = await getPrice(exchangeConfig.exchange, pos.symbol);
+        pos.currentPrice = currentPrice;
+        
+        // 计算未实现盈亏
+        if (pos.currentPrice && pos.entryPrice) {
+          const priceDiff = pos.direction === 'long' 
+            ? pos.currentPrice - pos.entryPrice
+            : pos.entryPrice - pos.currentPrice;
+          
+          const pnlPercent = (priceDiff / pos.entryPrice) * pos.leverage * 100;
+          const pnlAmount = pos.margin * (priceDiff / pos.entryPrice) * pos.leverage;
+          
+          pos.unrealizedPnl = Math.round(pnlAmount * 100) / 100;
+          pos.unrealizedPnlPercent = Math.round(pnlPercent * 100) / 100;
+          
+          console.log(`📊 同步 ${pos.symbol}: 开仓价=${pos.entryPrice}, 当前价=${currentPrice}, PnL=$${pos.unrealizedPnl} (${pos.unrealizedPnlPercent}%)`);
+        }
+      } catch (priceError) {
+        console.error(`获取 ${pos.symbol} 价格失败:`, priceError.message);
+      }
+    }
 
     res.json({
       success: true,
@@ -219,14 +278,13 @@ exports.getPositionHistory = async (req, res) => {
   }
 };
 
-// 重置持仓的触发器状态（允许止盈/止损重新触发）
-exports.resetTriggers = async (req, res) => {
+// 重置持仓的触发状态（允许止盈/止损再次触发）
+exports.resetPositionTriggers = async (req, res) => {
   try {
-    const { id } = req.params;
     const { resetTPs = true, resetSLs = true, resetProtectionSL = true } = req.body;
 
     const position = await Position.findOne({ 
-      _id: id, 
+      _id: req.params.id, 
       user: req.user._id,
       status: 'open'
     });
@@ -239,20 +297,20 @@ exports.resetTriggers = async (req, res) => {
     }
 
     const resetInfo = [];
-    
-    // 重置已触发的止盈
+
+    // 重置止盈触发记录
     if (resetTPs && position.triggeredTPs && position.triggeredTPs.length > 0) {
       resetInfo.push(`止盈 [${position.triggeredTPs.join(', ')}]`);
       position.triggeredTPs = [];
     }
-    
-    // 重置已触发的止损
+
+    // 重置止损触发记录
     if (resetSLs && position.triggeredSLs && position.triggeredSLs.length > 0) {
       resetInfo.push(`止损 [${position.triggeredSLs.join(', ')}]`);
       position.triggeredSLs = [];
     }
-    
-    // 重置保护性止损标记
+
+    // 重置保护性止损状态
     if (resetProtectionSL && position.protectionSLPlaced) {
       resetInfo.push('保护性止损');
       position.protectionSLPlaced = false;
@@ -260,64 +318,27 @@ exports.resetTriggers = async (req, res) => {
 
     await position.save();
 
-    console.log(`🔄 重置持仓触发器: ${position.symbol}, 重置内容: ${resetInfo.join(', ') || '无'}`);
+    console.log(`🔄 重置持仓触发状态: ${position.symbol} - ${resetInfo.join(', ') || '无需重置'}`);
 
     res.json({
       success: true,
       data: {
         positionId: position._id,
         symbol: position.symbol,
-        reset: resetInfo,
-        triggeredTPs: position.triggeredTPs,
-        triggeredSLs: position.triggeredSLs,
-        protectionSLPlaced: position.protectionSLPlaced
+        resetItems: resetInfo,
+        currentState: {
+          triggeredTPs: position.triggeredTPs,
+          triggeredSLs: position.triggeredSLs,
+          protectionSLPlaced: position.protectionSLPlaced
+        }
       },
       message: resetInfo.length > 0 ? `已重置: ${resetInfo.join(', ')}` : '无需重置'
     });
   } catch (error) {
-    console.error('ResetTriggers error:', error);
+    console.error('ResetPositionTriggers error:', error);
     res.status(500).json({
       success: false,
-      error: { code: 'INTERNAL_ERROR', message: '重置触发器失败' }
-    });
-  }
-};
-
-// 按交易对重置所有开放持仓的触发器
-exports.resetTriggersBySymbol = async (req, res) => {
-  try {
-    const { symbol } = req.params;
-
-    const result = await Position.updateMany(
-      { 
-        user: req.user._id,
-        symbol: symbol.toUpperCase(),
-        status: 'open'
-      },
-      {
-        $set: {
-          triggeredTPs: [],
-          triggeredSLs: [],
-          protectionSLPlaced: false
-        }
-      }
-    );
-
-    console.log(`🔄 重置 ${symbol} 所有持仓触发器, 影响 ${result.modifiedCount} 个持仓`);
-
-    res.json({
-      success: true,
-      data: {
-        symbol: symbol.toUpperCase(),
-        modifiedCount: result.modifiedCount
-      },
-      message: `已重置 ${symbol} 的 ${result.modifiedCount} 个持仓`
-    });
-  } catch (error) {
-    console.error('ResetTriggersBySymbol error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: '重置触发器失败' }
+      error: { code: 'INTERNAL_ERROR', message: '重置失败' }
     });
   }
 };
