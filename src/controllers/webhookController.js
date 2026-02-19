@@ -339,13 +339,51 @@ exports.receiveWebhook = async (req, res) => {
         status: 'open'
       });
 
+      // ========== 防重复触发逻辑 ==========
+      // 如果没有持仓，返回成功但不执行（适配 TradingView 每根 K 线触发）
       if (!position) {
-        await webhook.incrementReceived(false);
-        return res.status(404).json({
-          success: false,
-          error: { code: 'NO_POSITION', message: '未找到对应持仓' }
+        console.log(`⏭️  跳过: 没有 ${symbol} 持仓，不执行 ${action}`);
+        await webhook.incrementReceived(true);  // 标记为成功接收
+        return res.json({
+          success: true,
+          skipped: true,
+          reason: 'NO_POSITION',
+          message: `没有 ${symbol} 持仓，跳过 ${action}`
         });
       }
+
+      // 检查止盈/止损是否已触发过
+      const isTakeProfitAction = action === 'take_profit' || parsedTpIndex;
+      const isStopLossAction = action === 'stop_loss' || parsedSlIndex;
+      
+      if (isTakeProfitAction && parsedTpIndex) {
+        // 检查该止盈是否已触发
+        if (position.triggeredTPs && position.triggeredTPs.includes(parsedTpIndex)) {
+          console.log(`⏭️  跳过: 止盈 ${parsedTpIndex} 已触发过，不重复执行`);
+          await webhook.incrementReceived(true);
+          return res.json({
+            success: true,
+            skipped: true,
+            reason: 'TP_ALREADY_TRIGGERED',
+            message: `止盈 ${parsedTpIndex} 已触发过，跳过`
+          });
+        }
+      }
+      
+      if (isStopLossAction && parsedSlIndex) {
+        // 检查该止损是否已触发
+        if (position.triggeredSLs && position.triggeredSLs.includes(parsedSlIndex)) {
+          console.log(`⏭️  跳过: 止损 ${parsedSlIndex} 已触发过，不重复执行`);
+          await webhook.incrementReceived(true);
+          return res.json({
+            success: true,
+            skipped: true,
+            reason: 'SL_ALREADY_TRIGGERED',
+            message: `止损 ${parsedSlIndex} 已触发过，跳过`
+          });
+        }
+      }
+      // ========== 防重复触发逻辑结束 ==========
 
       // 创建订单记录（状态为 pending）
       order = await Order.create({
@@ -414,6 +452,24 @@ exports.receiveWebhook = async (req, res) => {
           position.quantity = position.quantity * (1 - closeSize / 100);
           position.margin = position.margin * (1 - closeSize / 100);
         }
+        
+        // ========== 记录已触发的止盈/止损（防止重复触发）==========
+        if (parsedTpIndex && (action === 'take_profit' || parsedTpIndex)) {
+          if (!position.triggeredTPs) position.triggeredTPs = [];
+          if (!position.triggeredTPs.includes(parsedTpIndex)) {
+            position.triggeredTPs.push(parsedTpIndex);
+            console.log(`✅ 记录止盈 ${parsedTpIndex} 已触发，当前已触发: [${position.triggeredTPs.join(', ')}]`);
+          }
+        }
+        if (parsedSlIndex && (action === 'stop_loss' || parsedSlIndex)) {
+          if (!position.triggeredSLs) position.triggeredSLs = [];
+          if (!position.triggeredSLs.includes(parsedSlIndex)) {
+            position.triggeredSLs.push(parsedSlIndex);
+            console.log(`✅ 记录止损 ${parsedSlIndex} 已触发，当前已触发: [${position.triggeredSLs.join(', ')}]`);
+          }
+        }
+        // ========== 记录结束 ==========
+        
         await position.save();
 
         result = {
@@ -450,8 +506,11 @@ exports.receiveWebhook = async (req, res) => {
         console.log(`   position.status: ${position.status}, quantity: ${position.quantity}`);
         
         if (shouldSetProtectionSL && isTakeProfit) {
-          // 检查是否还有剩余持仓需要保护
-          if (position.status === 'open' && position.quantity > 0) {
+          // 检查是否已挂过保护性止损
+          if (position.protectionSLPlaced) {
+            console.log('⏭️  保护性止损已挂过，跳过');
+          } else if (position.status === 'open' && position.quantity > 0) {
+            // 检查是否还有剩余持仓需要保护
             console.log('\n🛡️  止盈触发，准备挂保护性止损单...');
             console.log(`   剩余持仓: ${position.quantity}, 开仓价: ${position.entryPrice}`);
             
@@ -477,6 +536,10 @@ exports.receiveWebhook = async (req, res) => {
                 stopPrice: position.entryPrice,
                 quantity: position.quantity
               };
+
+              // 标记已挂保护性止损
+              position.protectionSLPlaced = true;
+              await position.save();
 
               console.log('✅ 保护性止损单挂单成功!');
               

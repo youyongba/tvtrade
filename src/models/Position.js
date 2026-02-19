@@ -81,6 +81,20 @@ const positionSchema = new mongoose.Schema({
   openedAt: {
     type: Date,
     default: Date.now
+  },
+  // 已触发的止盈止损记录（防止重复触发）
+  triggeredTPs: {
+    type: [Number],  // [1, 2, 3] 表示 tp_1, tp_2, tp_3 已触发
+    default: []
+  },
+  triggeredSLs: {
+    type: [Number],  // [1] 表示 sl_1 已触发
+    default: []
+  },
+  // 保护性止损是否已挂单
+  protectionSLPlaced: {
+    type: Boolean,
+    default: false
   }
 }, { 
   timestamps: true 
