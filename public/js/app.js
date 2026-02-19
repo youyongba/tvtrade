@@ -1210,20 +1210,20 @@ function renderEntries() {
         <div class="tp-section active entry-section" data-entry-id="${entry.id}" style="border-color: var(--accent-cyan);">
             <div class="tpsl-header-row">
                 <div class="tpsl-header-left">
-                    <input type="checkbox" class="entry-checkbox" ${entry.enabled ? 'checked' : ''} onchange="toggleEntry(${entry.id})">
+                    <input type="checkbox" class="entry-checkbox" ${entry.enabled ? 'checked' : ''} onchange="toggleEntry('${entry.id}')">
                     <span class="tp-label" style="color: var(--accent-cyan);">🚀 开仓 ${index + 1}</span>
                 </div>
                 <div class="tpsl-header-right">
                     <div class="mini-toggle">
-                        <button class="mini-toggle-btn ${entry.orderType === 'market' ? 'active' : ''}" onclick="setEntryOrderType(${entry.id}, 'market')">市价</button>
-                        <button class="mini-toggle-btn ${entry.orderType === 'limit' ? 'active' : ''}" onclick="setEntryOrderType(${entry.id}, 'limit')">限价</button>
+                        <button class="mini-toggle-btn ${entry.orderType === 'market' ? 'active' : ''}" onclick="setEntryOrderType('${entry.id}', 'market')">市价</button>
+                        <button class="mini-toggle-btn ${entry.orderType === 'limit' ? 'active' : ''}" onclick="setEntryOrderType('${entry.id}', 'limit')">限价</button>
                     </div>
-                    ${entries.length > 1 ? `<button class="delete-btn" onclick="deleteEntry(${entry.id})">×</button>` : ''}
+                    ${entries.length > 1 ? `<button class="delete-btn" onclick="deleteEntry('${entry.id}')">×</button>` : ''}
                 </div>
             </div>
             <div class="tpsl-simple-row">
                 <div class="tp-input-group" style="flex: 1;">
-                    <input type="text" class="form-input" value="${entry.positionSize}" placeholder="仓位比例" oninput="updateEntryPositionSize(${entry.id}, this.value)">
+                    <input type="text" class="form-input" value="${entry.positionSize}" placeholder="仓位比例" oninput="updateEntryPositionSize('${entry.id}', this.value)">
                     <span class="tp-input-suffix">% 仓位</span>
                 </div>
                 ${entry.orderType === 'limit' ? `
@@ -1232,7 +1232,7 @@ function renderEntries() {
                     <span class="tp-input-suffix">当前价</span>
                 </div>
                 ` : ''}
-                <button class="copy-btn" onclick="copyEntryWebhook(${entry.id})" style="height: 42px; min-width: 80px;">复制</button>
+                <button class="copy-btn" onclick="copyEntryWebhook('${entry.id}')" style="height: 42px; min-width: 80px;">复制</button>
             </div>
             <div class="webhook-container" style="margin-top: 0.75rem; border-color: var(--accent-cyan);">
                 <div class="webhook-code" id="entryWebhook_${entry.id}" style="max-height: 80px; font-size: 0.7rem;"></div>
@@ -1255,12 +1255,12 @@ function addEntry() {
 
 function deleteEntry(id) {
     if (entries.length <= 1) return;
-    entries = entries.filter(e => e.id !== id);
+    entries = entries.filter(e => String(e.id) !== String(id));
     renderEntries();
 }
 
 function toggleEntry(id) {
-    const entry = entries.find(e => e.id === id);
+    const entry = entries.find(e => String(e.id) === String(id));
     if (entry) {
         entry.enabled = !entry.enabled;
         updateAllWebhooks();
@@ -1268,7 +1268,7 @@ function toggleEntry(id) {
 }
 
 function setEntryOrderType(id, type) {
-    const entry = entries.find(e => e.id === id);
+    const entry = entries.find(e => String(e.id) === String(id));
     if (entry) {
         entry.orderType = type;
         renderEntries();
@@ -1276,7 +1276,7 @@ function setEntryOrderType(id, type) {
 }
 
 function updateEntryPositionSize(id, value) {
-    const entry = entries.find(e => e.id === id);
+    const entry = entries.find(e => String(e.id) === String(id));
     if (entry) {
         entry.positionSize = value;
         updateAllWebhooks();
@@ -1292,23 +1292,23 @@ function renderTakeProfits() {
         <div class="tp-section active" data-tp-id="${tp.id}">
             <div class="tpsl-header-row">
                 <div class="tpsl-header-left">
-                    <input type="checkbox" class="tp-checkbox" ${tp.enabled ? 'checked' : ''} onchange="toggleTP(${tp.id})">
+                    <input type="checkbox" class="tp-checkbox" ${tp.enabled ? 'checked' : ''} onchange="toggleTP('${tp.id}')">
                     <span class="tp-label">🎯 止盈 ${index + 1}</span>
                 </div>
                 <div class="tpsl-header-right">
                     <div class="mini-toggle">
-                        <button class="mini-toggle-btn ${tp.orderType === 'market' ? 'active' : ''}" onclick="setTPOrderType(${tp.id}, 'market')">市价</button>
-                        <button class="mini-toggle-btn ${tp.orderType === 'limit' ? 'active' : ''}" onclick="setTPOrderType(${tp.id}, 'limit')">限价</button>
+                        <button class="mini-toggle-btn ${tp.orderType === 'market' ? 'active' : ''}" onclick="setTPOrderType('${tp.id}', 'market')">市价</button>
+                        <button class="mini-toggle-btn ${tp.orderType === 'limit' ? 'active' : ''}" onclick="setTPOrderType('${tp.id}', 'limit')">限价</button>
                     </div>
-                    ${takeProfits.length > 1 ? `<button class="delete-btn" onclick="deleteTP(${tp.id})">×</button>` : ''}
+                    ${takeProfits.length > 1 ? `<button class="delete-btn" onclick="deleteTP('${tp.id}')">×</button>` : ''}
                 </div>
             </div>
             <div class="tpsl-simple-row">
                 <div class="tp-input-group" style="flex: 1;">
-                    <input type="text" class="form-input" value="${tp.closePercent}" placeholder="平仓比例" oninput="updateTPValue(${tp.id}, 'closePercent', this.value)">
+                    <input type="text" class="form-input" value="${tp.closePercent}" placeholder="平仓比例" oninput="updateTPValue('${tp.id}', 'closePercent', this.value)">
                     <span class="tp-input-suffix">% 仓位</span>
                 </div>
-                <button class="copy-btn" onclick="copyTPWebhook(${tp.id})" style="height: 42px; min-width: 80px;">复制</button>
+                <button class="copy-btn" onclick="copyTPWebhook('${tp.id}')" style="height: 42px; min-width: 80px;">复制</button>
             </div>
             <div class="webhook-container" style="margin-top: 0.75rem;">
                 <div class="webhook-code" id="tpWebhook_${tp.id}" style="max-height: 80px; font-size: 0.7rem;"></div>
@@ -1325,23 +1325,23 @@ function renderStopLosses() {
         <div class="sl-section active" data-sl-id="${sl.id}">
             <div class="tpsl-header-row">
                 <div class="tpsl-header-left">
-                    <input type="checkbox" class="sl-checkbox" ${sl.enabled ? 'checked' : ''} onchange="toggleSL(${sl.id})">
+                    <input type="checkbox" class="sl-checkbox" ${sl.enabled ? 'checked' : ''} onchange="toggleSL('${sl.id}')">
                     <span class="sl-label">🛡️ 止损 ${stopLosses.length > 1 ? index + 1 : ''}</span>
                 </div>
                 <div class="tpsl-header-right">
                     <div class="mini-toggle">
-                        <button class="mini-toggle-btn ${sl.orderType === 'market' ? 'active' : ''}" onclick="setSLOrderType(${sl.id}, 'market')">市价</button>
-                        <button class="mini-toggle-btn ${sl.orderType === 'limit' ? 'active' : ''}" onclick="setSLOrderType(${sl.id}, 'limit')">限价</button>
+                        <button class="mini-toggle-btn ${sl.orderType === 'market' ? 'active' : ''}" onclick="setSLOrderType('${sl.id}', 'market')">市价</button>
+                        <button class="mini-toggle-btn ${sl.orderType === 'limit' ? 'active' : ''}" onclick="setSLOrderType('${sl.id}', 'limit')">限价</button>
                     </div>
-                    ${stopLosses.length > 1 ? `<button class="delete-btn" onclick="deleteSL(${sl.id})">×</button>` : ''}
+                    ${stopLosses.length > 1 ? `<button class="delete-btn" onclick="deleteSL('${sl.id}')">×</button>` : ''}
                 </div>
             </div>
             <div class="tpsl-simple-row">
                 <div class="tp-input-group" style="flex: 1;">
-                    <input type="text" class="form-input" value="${sl.closePercent}" placeholder="平仓比例" oninput="updateSLValue(${sl.id}, 'closePercent', this.value)">
+                    <input type="text" class="form-input" value="${sl.closePercent}" placeholder="平仓比例" oninput="updateSLValue('${sl.id}', 'closePercent', this.value)">
                     <span class="tp-input-suffix">% 仓位</span>
                 </div>
-                <button class="copy-btn" onclick="copySLWebhook(${sl.id})" style="height: 42px; min-width: 80px;">复制</button>
+                <button class="copy-btn" onclick="copySLWebhook('${sl.id}')" style="height: 42px; min-width: 80px;">复制</button>
             </div>
             <div class="webhook-container" style="margin-top: 0.75rem;">
                 <div class="webhook-code" id="slWebhook_${sl.id}" style="max-height: 80px; font-size: 0.7rem;"></div>
@@ -1361,14 +1361,14 @@ function addStopLoss() {
     renderStopLosses();
 }
 
-function deleteTP(id) { takeProfits = takeProfits.filter(tp => tp.id !== id); renderTakeProfits(); }
-function deleteSL(id) { stopLosses = stopLosses.filter(sl => sl.id !== id); renderStopLosses(); }
+function deleteTP(id) { takeProfits = takeProfits.filter(tp => String(tp.id) !== String(id)); renderTakeProfits(); }
+function deleteSL(id) { stopLosses = stopLosses.filter(sl => String(sl.id) !== String(id)); renderStopLosses(); }
 
-function toggleTP(id) { const tp = takeProfits.find(t => t.id === id); if (tp) { tp.enabled = !tp.enabled; updateAllWebhooks(); } }
-function toggleSL(id) { const sl = stopLosses.find(s => s.id === id); if (sl) { sl.enabled = !sl.enabled; updateAllWebhooks(); } }
+function toggleTP(id) { const tp = takeProfits.find(t => String(t.id) === String(id)); if (tp) { tp.enabled = !tp.enabled; updateAllWebhooks(); } }
+function toggleSL(id) { const sl = stopLosses.find(s => String(s.id) === String(id)); if (sl) { sl.enabled = !sl.enabled; updateAllWebhooks(); } }
 
-function setTPOrderType(id, type) { const tp = takeProfits.find(t => t.id === id); if (tp) { tp.orderType = type; renderTakeProfits(); } }
-function setSLOrderType(id, type) { const sl = stopLosses.find(s => s.id === id); if (sl) { sl.orderType = type; renderStopLosses(); } }
+function setTPOrderType(id, type) { const tp = takeProfits.find(t => String(t.id) === String(id)); if (tp) { tp.orderType = type; renderTakeProfits(); } }
+function setSLOrderType(id, type) { const sl = stopLosses.find(s => String(s.id) === String(id)); if (sl) { sl.orderType = type; renderStopLosses(); } }
 
 function setProtectionOrderType(type) {
     const btns = document.querySelectorAll('#protectionOrderType .mini-toggle-btn');
@@ -1379,8 +1379,8 @@ function setProtectionOrderType(type) {
     updateAllWebhooks();
 }
 
-function updateTPValue(id, field, value) { const tp = takeProfits.find(t => t.id === id); if (tp) { tp[field] = value; updateAllWebhooks(); } }
-function updateSLValue(id, field, value) { const sl = stopLosses.find(s => s.id === id); if (sl) { sl[field] = value; updateAllWebhooks(); } }
+function updateTPValue(id, field, value) { const tp = takeProfits.find(t => String(t.id) === String(id)); if (tp) { tp[field] = value; updateAllWebhooks(); } }
+function updateSLValue(id, field, value) { const sl = stopLosses.find(s => String(s.id) === String(id)); if (sl) { sl[field] = value; updateAllWebhooks(); } }
 
 function copyTPWebhook(id) { const code = document.getElementById(`tpWebhook_${id}`).textContent; copyToClipboard(code, document.querySelector(`[data-tp-id="${id}"] .copy-btn`)); }
 function copySLWebhook(id) { const code = document.getElementById(`slWebhook_${id}`).textContent; copyToClipboard(code, document.querySelector(`[data-sl-id="${id}"] .copy-btn`)); }
