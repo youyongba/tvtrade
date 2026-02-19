@@ -950,6 +950,182 @@ select.form-input {
     to { transform: rotate(360deg); }
 }
 
+/* ==================== 持仓卡片美化 ==================== */
+
+.btn-icon {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+}
+
+.btn-icon:hover {
+    background: var(--accent-cyan);
+    border-color: var(--accent-cyan);
+    color: white;
+}
+
+.btn-text {
+    background: none;
+    border: none;
+    color: var(--accent-cyan);
+    font-size: 0.7rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-family: inherit;
+}
+
+.btn-text:hover {
+    background: rgba(14, 165, 233, 0.15);
+}
+
+.btn-text .reset-icon {
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+.status-section {
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    padding: 0.75rem;
+    margin-top: 1rem;
+}
+
+.status-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.status-title {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.status-tag {
+    padding: 0.25rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.status-tag.success {
+    background: rgba(52, 211, 153, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.status-tag.danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.status-tag.cyan {
+    background: rgba(14, 165, 233, 0.15);
+    color: var(--accent-cyan);
+    border: 1px solid rgba(14, 165, 233, 0.3);
+}
+
+.status-tag.muted {
+    background: rgba(148, 163, 184, 0.1);
+    color: var(--text-muted);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.position-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.btn-action {
+    padding: 0.6rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.btn-action:hover {
+    background: var(--accent-cyan);
+    border-color: var(--accent-cyan);
+    color: white;
+}
+
+.btn-action.danger {
+    border-color: rgba(239, 68, 68, 0.5);
+    color: var(--danger);
+}
+
+.btn-action.danger:hover {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: white;
+}
+
+.more-positions {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: 0.75rem;
+    text-align: center;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* 优化持仓卡片内的盈亏显示 */
+.position-card .pnl-display {
+    text-align: center;
+    padding: 1rem;
+    background: var(--bg-tertiary);
+    border-radius: 10px;
+    margin-top: 1rem;
+}
+
+.position-card .pnl-display .pnl-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.position-card .pnl-display .pnl-percent {
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
     .main-container { grid-template-columns: 1fr; }

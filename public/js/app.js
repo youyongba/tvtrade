@@ -2036,39 +2036,60 @@ function renderPositions() {
         
         card.className = `card position-card ${isProfit ? '' : 'loss'}`;
         
+        // 构建状态标签
+        let statusTags = '';
+        if (hasTriggeredItems) {
+            statusTags = [
+                ...triggeredTPs.map(tp => `<span class="status-tag success">✓ 止盈${tp}</span>`),
+                ...triggeredSLs.map(sl => `<span class="status-tag danger">✓ 止损${sl}</span>`),
+                protectionSLPlaced ? `<span class="status-tag cyan">🛡️ 保本止损</span>` : ''
+            ].filter(Boolean).join('');
+        } else {
+            statusTags = `<span class="status-tag muted">⏳ 等待触发</span>`;
+        }
+        
         container.innerHTML = `
             <div class="position-header">
                 <span class="position-symbol">${pos.symbol}</span>
                 <span class="position-badge ${pos.direction}">${pos.direction.toUpperCase()} ${pos.leverage}x</span>
-                <button class="mini-action-btn" onclick="syncPositions()" style="margin-left: auto; padding: 0.25rem 0.5rem; font-size: 0.7rem;">🔄 同步</button>
+                <button class="btn-icon" onclick="syncPositions()" title="同步价格">🔄</button>
             </div>
             <div class="position-stats">
-                <div class="stat-item"><div class="stat-label">开仓价格</div><div class="stat-value">$${pos.entryPrice?.toLocaleString() || '--'}</div></div>
-                <div class="stat-item"><div class="stat-label">当前价格</div><div class="stat-value ${isProfit ? 'profit' : 'loss'}">$${pos.currentPrice?.toLocaleString() || '--'}</div></div>
-                <div class="stat-item"><div class="stat-label">持仓数量</div><div class="stat-value">${pos.quantity || 0} ${pos.symbol?.replace('USDT', '') || ''}</div></div>
-                <div class="stat-item"><div class="stat-label">保证金</div><div class="stat-value">$${pos.margin?.toFixed(2) || '0.00'}</div></div>
+                <div class="stat-item">
+                    <div class="stat-label">开仓价</div>
+                    <div class="stat-value">$${pos.entryPrice?.toLocaleString() || '--'}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">当前价</div>
+                    <div class="stat-value ${isProfit ? 'profit' : 'loss'}">$${pos.currentPrice?.toLocaleString() || '--'}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">数量</div>
+                    <div class="stat-value">${pos.quantity || 0}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">保证金</div>
+                    <div class="stat-value">$${pos.margin?.toFixed(2) || '0.00'}</div>
+                </div>
             </div>
             <div class="pnl-display">
-                <div class="pnl-label">未实现盈亏</div>
                 <div class="pnl-value ${isProfit ? 'profit' : 'loss'}">${isProfit ? '+' : ''}$${pnl.toFixed(2)}</div>
                 <div class="pnl-percent ${isProfit ? 'profit' : 'loss'}">${isProfit ? '+' : ''}${pnlPercent.toFixed(2)}%</div>
             </div>
-            ${hasTriggeredItems ? `
-            <div style="background: var(--bg-tertiary); border-radius: 6px; padding: 0.5rem; margin-top: 0.75rem; font-size: 0.7rem;">
-                <div style="color: var(--text-muted); margin-bottom: 0.25rem;">已触发状态:</div>
-                <div style="display: flex; flex-wrap: wrap; gap: 0.25rem;">
-                    ${triggeredTPs.map(tp => `<span style="background: var(--success); color: white; padding: 0.1rem 0.4rem; border-radius: 4px;">止盈${tp}</span>`).join('')}
-                    ${triggeredSLs.map(sl => `<span style="background: var(--danger); color: white; padding: 0.1rem 0.4rem; border-radius: 4px;">止损${sl}</span>`).join('')}
-                    ${protectionSLPlaced ? `<span style="background: var(--accent-cyan); color: white; padding: 0.1rem 0.4rem; border-radius: 4px;">保本止损</span>` : ''}
+            <div class="status-section">
+                <div class="status-header">
+                    <span class="status-title">交易状态</span>
+                    <button class="btn-text" onclick="resetPositionTriggers('${pos._id}')" title="重置后可再次触发止盈止损">
+                        <span class="reset-icon">↻</span> 重置
+                    </button>
                 </div>
+                <div class="status-tags">${statusTags}</div>
             </div>
-            ` : ''}
-            <div style="display: grid; grid-template-columns: ${hasTriggeredItems ? '1fr 1fr 1fr' : '1fr 1fr'}; gap: 0.5rem; margin-top: 1rem;">
-                <button class="mini-action-btn" onclick="closePosition('${pos._id}', 50)">平仓 50%</button>
-                <button class="mini-action-btn danger" onclick="closePosition('${pos._id}', 100)">全部平仓</button>
-                ${hasTriggeredItems ? `<button class="mini-action-btn" onclick="resetPositionTriggers('${pos._id}')" style="background: var(--accent-cyan);">🔄 重置</button>` : ''}
+            <div class="position-actions">
+                <button class="btn-action" onclick="closePosition('${pos._id}', 50)">平仓 50%</button>
+                <button class="btn-action danger" onclick="closePosition('${pos._id}', 100)">全部平仓</button>
             </div>
-            ${positions.length > 1 ? `<div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.5rem; text-align: center;">还有 ${positions.length - 1} 个持仓</div>` : ''}
+            ${positions.length > 1 ? `<div class="more-positions">还有 ${positions.length - 1} 个持仓</div>` : ''}
         `;
     } else {
         // 没有真实持仓，显示模拟/预览
