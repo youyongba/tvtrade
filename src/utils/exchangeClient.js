@@ -689,11 +689,25 @@ async function placeBinanceStopOrder(apiKey, apiSecret, params) {
   
   const { symbol, side, positionSide, quantity, stopPrice } = params;
   
-  // 获取价格精度
+  // 获取交易对精度信息
   const symbolInfo = await getBinanceSymbolInfo(symbol);
+  
+  // 格式化价格精度
   const formattedStopPrice = parseFloat(stopPrice).toFixed(symbolInfo.pricePrecision);
   
-  let queryParams = `symbol=${symbol}&side=${side}&type=STOP_MARKET&quantity=${quantity}&stopPrice=${formattedStopPrice}&timestamp=${serverTime}&recvWindow=60000`;
+  // 格式化数量精度（向下取整，避免超出持仓）
+  const qtyPrecision = symbolInfo.quantityPrecision;
+  const multiplier = Math.pow(10, qtyPrecision);
+  let formattedQuantity = Math.floor(parseFloat(quantity) * multiplier) / multiplier;
+  
+  // 确保不小于最小数量
+  if (formattedQuantity < symbolInfo.minQty) {
+    formattedQuantity = symbolInfo.minQty;
+  }
+  
+  console.log(`📐 精度处理: 原数量=${quantity}, 格式化后=${formattedQuantity}, 精度=${qtyPrecision}, 最小=${symbolInfo.minQty}`);
+  
+  let queryParams = `symbol=${symbol}&side=${side}&type=STOP_MARKET&quantity=${formattedQuantity}&stopPrice=${formattedStopPrice}&timestamp=${serverTime}&recvWindow=60000`;
   
   // 双向持仓模式需要 positionSide
   if (positionSide) {

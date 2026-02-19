@@ -153,13 +153,33 @@ exports.receiveWebhook = async (req, res) => {
       close_percent,    // "50%"
       order_type,       // market, limit
       entry_index,      // 1, 2, 3...
-      tp_index,         // 止盈索引
-      sl_index,         // 止损索引
+      tp_index,         // 止盈索引（可选）
+      sl_index,         // 止损索引（可选）
+      trigger,          // "tp_1", "sl_1" 等（前端发送）
       // 保护性止损相关字段
       set_protection_sl,        // true/false - 是否在止盈后挂保护性止损
       protection_sl_price,      // "entry_price" - 止损价格（开仓价）
       protection_sl_order_type  // "market" - 止损订单类型
     } = payload;
+    
+    // 兼容处理：从 trigger 字段解析 tp_index 或 sl_index
+    let parsedTpIndex = tp_index;
+    let parsedSlIndex = sl_index;
+    if (trigger) {
+      if (trigger.startsWith('tp_')) {
+        parsedTpIndex = parseInt(trigger.replace('tp_', '')) || 1;
+      } else if (trigger.startsWith('sl_')) {
+        parsedSlIndex = parseInt(trigger.replace('sl_', '')) || 1;
+      }
+    }
+    // 如果是 take_profit action 但没有 tp_index，默认为 1
+    if (action === 'take_profit' && !parsedTpIndex) {
+      parsedTpIndex = 1;
+    }
+    // 如果是 stop_loss action 但没有 sl_index，默认为 1
+    if (action === 'stop_loss' && !parsedSlIndex) {
+      parsedSlIndex = 1;
+    }
 
     if (!action || !symbol) {
       await webhook.incrementReceived(false);
@@ -298,9 +318,18 @@ exports.receiveWebhook = async (req, res) => {
       }
       // ========== 真实交易所下单结束 ==========
 
-    } else if (action.startsWith('close_') || action === 'protection_sl') {
-      // 平仓操作
-      const direction = action.includes('long') ? 'long' : 'short';
+    } else if (action.startsWith('close_') || action === 'protection_sl' || action === 'take_profit' || action === 'stop_loss') {
+      // 平仓操作（包括止盈、止损）
+      // 从 action 或现有持仓判断方向
+      let direction;
+      if (action.includes('long')) {
+        direction = 'long';
+      } else if (action.includes('short')) {
+        direction = 'short';
+      } else {
+        // take_profit/stop_loss 不包含方向，从持仓中获取
+        direction = null; // 后面从持仓获取
+      }
       const closeSize = parseFloat(close_percent?.replace('%', '') || 100);
 
       // 查找对应的持仓
@@ -329,7 +358,7 @@ exports.receiveWebhook = async (req, res) => {
         status: 'pending',
         source: 'webhook',
         webhookTrigger: action === 'protection_sl' ? 'protection_sl' : 
-                        tp_index ? `tp_${tp_index}` : `sl_${sl_index || 1}`,
+                        parsedTpIndex ? `tp_${parsedTpIndex}` : `sl_${parsedSlIndex || 1}`,
         position: position._id
       });
 
@@ -378,7 +407,7 @@ exports.receiveWebhook = async (req, res) => {
           position.closePrice = closeResult.closePrice;
           position.closedAt = new Date();
           position.closeReason = action === 'protection_sl' ? 'stop_loss' : 
-                                  tp_index ? 'take_profit' : 'stop_loss';
+                                  (action === 'take_profit' || parsedTpIndex) ? 'take_profit' : 'stop_loss';
           position.realizedPnl = Math.round(pnl * 100) / 100;
         } else {
           // 部分平仓
@@ -402,15 +431,25 @@ exports.receiveWebhook = async (req, res) => {
         };
 
         // 记录活动
-        const activityType = tp_index ? 'tp_triggered' : 'sl_triggered';
+        const isTakeProfit = action === 'take_profit' || parsedTpIndex;
+        const activityType = isTakeProfit ? 'tp_triggered' : 'sl_triggered';
         await Activity.log(user._id, activityType, 
-          `${tp_index ? '止盈' : '止损'}触发 平${closeSize}%仓`, 
+          `${isTakeProfit ? '止盈' : '止损'}触发 平${closeSize}%仓`, 
           { symbol, amount: Math.round(pnl * 100) / 100 }
         );
 
         // ========== 保护性止损逻辑 ==========
         // 如果是止盈触发且设置了保护性止损，在开仓价挂止损单
-        if (set_protection_sl === true && (action === 'take_profit' || tp_index)) {
+        // 支持布尔值 true 或字符串 "true"
+        const shouldSetProtectionSL = set_protection_sl === true || set_protection_sl === 'true';
+        
+        console.log('\n📊 保护性止损检查:');
+        console.log(`   set_protection_sl: ${set_protection_sl} (type: ${typeof set_protection_sl})`);
+        console.log(`   shouldSetProtectionSL: ${shouldSetProtectionSL}`);
+        console.log(`   isTakeProfit: ${isTakeProfit}`);
+        console.log(`   position.status: ${position.status}, quantity: ${position.quantity}`);
+        
+        if (shouldSetProtectionSL && isTakeProfit) {
           // 检查是否还有剩余持仓需要保护
           if (position.status === 'open' && position.quantity > 0) {
             console.log('\n🛡️  止盈触发，准备挂保护性止损单...');
