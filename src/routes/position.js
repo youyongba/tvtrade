@@ -21,4 +21,10 @@ router.get('/:id', positionController.getPosition);
 // 平仓
 router.post('/:id/close', positionController.closePosition);
 
+// 重置单个持仓的触发器
+router.post('/:id/reset-triggers', positionController.resetTriggers);
+
+// 按交易对重置所有持仓的触发器
+router.post('/reset-triggers/:symbol', positionController.resetTriggersBySymbol);
+
 module.exports = router;

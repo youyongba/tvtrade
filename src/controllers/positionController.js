@@ -218,3 +218,106 @@ exports.getPositionHistory = async (req, res) => {
     });
   }
 };
+
+// 重置持仓的触发器状态（允许止盈/止损重新触发）
+exports.resetTriggers = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { resetTPs = true, resetSLs = true, resetProtectionSL = true } = req.body;
+
+    const position = await Position.findOne({ 
+      _id: id, 
+      user: req.user._id,
+      status: 'open'
+    });
+
+    if (!position) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: '持仓不存在或已平仓' }
+      });
+    }
+
+    const resetInfo = [];
+    
+    // 重置已触发的止盈
+    if (resetTPs && position.triggeredTPs && position.triggeredTPs.length > 0) {
+      resetInfo.push(`止盈 [${position.triggeredTPs.join(', ')}]`);
+      position.triggeredTPs = [];
+    }
+    
+    // 重置已触发的止损
+    if (resetSLs && position.triggeredSLs && position.triggeredSLs.length > 0) {
+      resetInfo.push(`止损 [${position.triggeredSLs.join(', ')}]`);
+      position.triggeredSLs = [];
+    }
+    
+    // 重置保护性止损标记
+    if (resetProtectionSL && position.protectionSLPlaced) {
+      resetInfo.push('保护性止损');
+      position.protectionSLPlaced = false;
+    }
+
+    await position.save();
+
+    console.log(`🔄 重置持仓触发器: ${position.symbol}, 重置内容: ${resetInfo.join(', ') || '无'}`);
+
+    res.json({
+      success: true,
+      data: {
+        positionId: position._id,
+        symbol: position.symbol,
+        reset: resetInfo,
+        triggeredTPs: position.triggeredTPs,
+        triggeredSLs: position.triggeredSLs,
+        protectionSLPlaced: position.protectionSLPlaced
+      },
+      message: resetInfo.length > 0 ? `已重置: ${resetInfo.join(', ')}` : '无需重置'
+    });
+  } catch (error) {
+    console.error('ResetTriggers error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: '重置触发器失败' }
+    });
+  }
+};
+
+// 按交易对重置所有开放持仓的触发器
+exports.resetTriggersBySymbol = async (req, res) => {
+  try {
+    const { symbol } = req.params;
+
+    const result = await Position.updateMany(
+      { 
+        user: req.user._id,
+        symbol: symbol.toUpperCase(),
+        status: 'open'
+      },
+      {
+        $set: {
+          triggeredTPs: [],
+          triggeredSLs: [],
+          protectionSLPlaced: false
+        }
+      }
+    );
+
+    console.log(`🔄 重置 ${symbol} 所有持仓触发器, 影响 ${result.modifiedCount} 个持仓`);
+
+    res.json({
+      success: true,
+      data: {
+        symbol: symbol.toUpperCase(),
+        modifiedCount: result.modifiedCount
+      },
+      message: `已重置 ${symbol} 的 ${result.modifiedCount} 个持仓`
+    });
+  } catch (error) {
+    console.error('ResetTriggersBySymbol error:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: '重置触发器失败' }
+    });
+  }
+};

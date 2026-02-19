@@ -1984,6 +1984,12 @@ function renderPositions() {
         const pnlPercent = pos.unrealizedPnlPercent || 0;
         const isProfit = pnl >= 0;
         
+        // 触发状态显示
+        const triggeredTPs = pos.triggeredTPs || [];
+        const triggeredSLs = pos.triggeredSLs || [];
+        const protectionSLPlaced = pos.protectionSLPlaced || false;
+        const hasTriggered = triggeredTPs.length > 0 || triggeredSLs.length > 0 || protectionSLPlaced;
+        
         card.className = `card position-card ${isProfit ? '' : 'loss'}`;
         
         container.innerHTML = `
@@ -1998,6 +2004,16 @@ function renderPositions() {
                 <div class="stat-item"><div class="stat-label">持仓数量</div><div class="stat-value">${pos.quantity || 0} ${pos.symbol?.replace('USDT', '') || ''}</div></div>
                 <div class="stat-item"><div class="stat-label">保证金</div><div class="stat-value">$${pos.margin?.toFixed(2) || '0.00'}</div></div>
             </div>
+            ${hasTriggered ? `
+            <div style="background: var(--bg-tertiary); border-radius: 6px; padding: 0.5rem; margin-top: 0.5rem; font-size: 0.7rem;">
+                <div style="color: var(--text-muted); margin-bottom: 0.25rem;">已触发状态:</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 0.25rem;">
+                    ${triggeredTPs.map(tp => `<span style="background: var(--success); color: white; padding: 0.1rem 0.4rem; border-radius: 4px;">止盈${tp}</span>`).join('')}
+                    ${triggeredSLs.map(sl => `<span style="background: var(--danger); color: white; padding: 0.1rem 0.4rem; border-radius: 4px;">止损${sl}</span>`).join('')}
+                    ${protectionSLPlaced ? `<span style="background: var(--warning); color: black; padding: 0.1rem 0.4rem; border-radius: 4px;">保本止损</span>` : ''}
+                </div>
+            </div>
+            ` : ''}
             <div class="pnl-display">
                 <div class="pnl-label">未实现盈亏</div>
                 <div class="pnl-value ${isProfit ? 'profit' : 'loss'}">${isProfit ? '+' : ''}$${pnl.toFixed(2)}</div>
@@ -2007,6 +2023,9 @@ function renderPositions() {
                 <button class="mini-action-btn" onclick="closePosition('${pos._id}', 50)">平仓 50%</button>
                 <button class="mini-action-btn danger" onclick="closePosition('${pos._id}', 100)">全部平仓</button>
             </div>
+            ${hasTriggered ? `
+            <button class="mini-action-btn" onclick="resetTriggers('${pos._id}')" style="width: 100%; margin-top: 0.5rem; background: var(--accent-purple);">🔄 重置交易计划</button>
+            ` : ''}
             ${positions.length > 1 ? `<div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.5rem; text-align: center;">还有 ${positions.length - 1} 个持仓</div>` : ''}
         `;
     } else {
@@ -2043,6 +2062,81 @@ function updatePosition() {
 }
 
 // 模拟函数已移除 - 持仓通过 Webhook 实际交易产生
+
+// ==================== 重置交易计划 ====================
+
+// 重置单个持仓的触发器
+async function resetTriggers(positionId) {
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        showToast('请先登录', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/positions/${positionId}/reset-triggers`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                resetTPs: true,
+                resetSLs: true,
+                resetProtectionSL: true
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast(result.message || '交易计划已重置', 'success');
+            addActivity('config_loaded', '重置交易计划', currentPosition?.symbol || '');
+            
+            // 刷新持仓列表
+            await fetchPositions();
+        } else {
+            showToast(result.error?.message || '重置失败', 'error');
+        }
+    } catch (error) {
+        console.error('Reset triggers error:', error);
+        showToast('重置失败', 'error');
+    }
+}
+
+// 按交易对重置所有持仓的触发器
+async function resetTriggersBySymbol(symbol) {
+    const token = localStorage.getItem('tvtrade_token');
+    if (!token) {
+        showToast('请先登录', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/positions/reset-triggers/${symbol}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast(result.message || '交易计划已重置', 'success');
+            addActivity('config_loaded', `重置 ${symbol} 交易计划`, symbol);
+            
+            // 刷新持仓列表
+            await fetchPositions();
+        } else {
+            showToast(result.error?.message || '重置失败', 'error');
+        }
+    } catch (error) {
+        console.error('Reset triggers error:', error);
+        showToast('重置失败', 'error');
+    }
+}
 
 // ==================== 工具函数 ====================
 
