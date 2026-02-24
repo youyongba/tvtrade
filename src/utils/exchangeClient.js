@@ -582,12 +582,22 @@ async function closeBinancePosition(apiKey, apiSecret, params) {
   const symbolInfo = await getBinanceSymbolInfo(symbol);
   
   // 3. 计算平仓数量
-  let closeQuantity = quantity * closePercent / 100;
-  closeQuantity = Math.floor(closeQuantity * Math.pow(10, symbolInfo.quantityPrecision)) / Math.pow(10, symbolInfo.quantityPrecision);
+  let closeQuantity;
   
-  if (closeQuantity < symbolInfo.minQty) {
-    // 数量太小，全部平仓
+  if (closePercent >= 100) {
+    // 100% 平仓，直接使用原始数量（不做精度处理，避免丢失）
     closeQuantity = quantity;
+    console.log(`全部平仓: ${closeQuantity}`);
+  } else {
+    // 部分平仓，需要精度处理
+    closeQuantity = quantity * closePercent / 100;
+    // 使用 toFixed 而不是 floor，避免丢失精度
+    closeQuantity = parseFloat(closeQuantity.toFixed(symbolInfo.quantityPrecision));
+    
+    if (closeQuantity < symbolInfo.minQty) {
+      closeQuantity = symbolInfo.minQty;
+    }
+    console.log(`部分平仓: ${closeQuantity} (${closePercent}% of ${quantity})`);
   }
   
   console.log(`平仓数量: ${closeQuantity} (原持仓: ${quantity})`);
@@ -707,20 +717,19 @@ async function placeBinanceStopOrder(apiKey, apiSecret, params) {
   
   console.log(`📐 精度处理: 原数量=${quantity}, 格式化后=${formattedQuantity}, 精度=${qtyPrecision}, 最小=${symbolInfo.minQty}`);
   
-  let queryParams = `symbol=${symbol}&side=${side}&type=STOP_MARKET&quantity=${formattedQuantity}&stopPrice=${formattedStopPrice}&timestamp=${serverTime}&recvWindow=60000`;
+  // 使用 closePosition=true 来平掉该方向的所有剩余仓位
+  // 这是 Binance 推荐的止损单方式，避免 -4120 错误
+  let queryParams = `symbol=${symbol}&side=${side}&type=STOP_MARKET&closePosition=true&stopPrice=${formattedStopPrice}&timestamp=${serverTime}&recvWindow=60000`;
   
   // 双向持仓模式需要 positionSide
   if (positionSide) {
     queryParams += `&positionSide=${positionSide}`;
   }
   
-  // 平仓时设置 reduceOnly（单向持仓模式）
-  // queryParams += `&reduceOnly=true`;
-  
   const signature = createSignature(queryParams, apiSecret);
   const url = `${config.baseUrl}/fapi/v1/order?${queryParams}&signature=${signature}`;
   
-  console.log(`📤 Binance 挂止损单: ${side} ${symbol} ${quantity} @ STOP_MARKET 触发价=${formattedStopPrice}`);
+  console.log(`📤 Binance 挂止损单: ${side} ${symbol} closePosition=true @ STOP_MARKET 触发价=${formattedStopPrice}`);
   
   const data = await httpsRequest(url, {
     method: 'POST',

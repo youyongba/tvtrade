@@ -790,6 +790,7 @@ async function fetchPositions() {
     }
     
     try {
+        // 获取开仓的持仓
         const response = await fetch('/api/positions', {
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -800,6 +801,26 @@ async function fetchPositions() {
         
         if (result.success) {
             positions = result.data || [];
+            
+            // 如果没有开仓持仓，获取最近关闭的持仓
+            if (positions.length === 0) {
+                try {
+                    const historyResponse = await fetch('/api/positions/history?limit=1', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    const historyResult = await historyResponse.json();
+                    if (historyResult.success && historyResult.data?.length > 0) {
+                        lastClosedPosition = historyResult.data[0];
+                    }
+                } catch (e) {
+                    console.log('获取历史持仓失败:', e);
+                }
+            } else {
+                lastClosedPosition = null;
+            }
+            
             renderPositions();
         } else {
             console.error('Fetch positions error:', result.error);
@@ -2097,6 +2118,9 @@ function renderPositions() {
     }
 }
 
+// 最近关闭的持仓（用于空仓时显示）
+let lastClosedPosition = null;
+
 // 显示空持仓状态
 function updatePosition() {
     const container = document.getElementById('positionBody');
@@ -2115,13 +2139,80 @@ function updatePosition() {
     const isLong = settings.direction === 'long';
     card.className = `card position-card ${isLong ? '' : 'loss'}`;
     
-    container.innerHTML = `
-        <div class="empty-state" style="padding: 2rem 1rem;">
-            <div class="empty-state-icon">📊</div>
-            <div style="color: var(--text-muted); margin-bottom: 0.5rem;">暂无持仓</div>
-            <div style="font-size: 0.7rem; color: var(--text-muted);">开始交易后，持仓信息将在此显示</div>
-        </div>
-    `;
+    // 检查是否有最近关闭的持仓
+    if (lastClosedPosition) {
+        const pos = lastClosedPosition;
+        const pnl = pos.realizedPnl || 0;
+        const isProfit = pnl >= 0;
+        const closeReason = pos.closeReason === 'take_profit' ? '止盈' : 
+                           pos.closeReason === 'stop_loss' ? '止损' : '手动';
+        
+        container.innerHTML = `
+            <div style="padding: 1rem;">
+                <div class="status-section" style="margin-top: 0;">
+                    <div class="status-header">
+                        <span class="status-title">最近交易</span>
+                        <span style="font-size: 0.7rem; color: var(--text-muted);">${formatRelativeTime(new Date(pos.closedAt))}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                        <div>
+                            <span style="font-weight: 600;">${pos.symbol}</span>
+                            <span class="position-badge ${pos.direction}" style="margin-left: 0.5rem; font-size: 0.65rem;">${pos.direction?.toUpperCase()}</span>
+                        </div>
+                        <div class="${isProfit ? 'profit' : 'loss'}" style="font-weight: 600;">
+                            ${isProfit ? '+' : ''}$${pnl.toFixed(2)}
+                        </div>
+                    </div>
+                    <div class="status-tags" style="margin-top: 0.5rem;">
+                        <span class="status-tag ${pos.closeReason === 'take_profit' ? 'success' : 'danger'}">
+                            ${closeReason}平仓
+                        </span>
+                        ${pos.triggeredTPs?.length ? pos.triggeredTPs.map(tp => `<span class="status-tag success">✓ 止盈${tp}</span>`).join('') : ''}
+                        ${pos.triggeredSLs?.length ? pos.triggeredSLs.map(sl => `<span class="status-tag danger">✓ 止损${sl}</span>`).join('') : ''}
+                        ${pos.protectionSLPlaced ? `<span class="status-tag cyan">🛡️ 保本止损</span>` : ''}
+                    </div>
+                </div>
+                
+                <div class="status-section">
+                    <div class="status-header">
+                        <span class="status-title">当前状态</span>
+                    </div>
+                    <div class="status-tags">
+                        <span class="status-tag success">✓ 已就绪</span>
+                        <span class="status-tag muted">等待开仓信号</span>
+                    </div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.5rem;">
+                        下一次开仓将创建新的交易周期，触发状态自动重置
+                    </div>
+                </div>
+                
+                <div style="margin-top: 1rem;">
+                    <button class="btn-action" onclick="clearLastPosition()" style="width: 100%;">
+                        清除记录，准备新交易
+                    </button>
+                </div>
+            </div>
+        `;
+    } else {
+        container.innerHTML = `
+            <div class="empty-state" style="padding: 2rem 1rem;">
+                <div class="empty-state-icon">📊</div>
+                <div style="color: var(--text-muted); margin-bottom: 0.5rem;">暂无持仓</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted);">开始交易后，持仓信息将在此显示</div>
+                <div class="status-tags" style="margin-top: 1rem; justify-content: center;">
+                    <span class="status-tag success">✓ 已就绪</span>
+                    <span class="status-tag muted">等待开仓信号</span>
+                </div>
+            </div>
+        `;
+    }
+}
+
+// 清除最近关闭的持仓记录
+function clearLastPosition() {
+    lastClosedPosition = null;
+    updatePosition();
+    showToast('已清除，准备接收新交易', 'success');
 }
 
 // 模拟函数已移除 - 持仓通过 Webhook 实际交易产生
