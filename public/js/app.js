@@ -1207,7 +1207,7 @@ function updateUIState() {
 
 // Data stores
 let entries = [
-    { id: 1, positionSize: '30', orderType: 'market', enabled: true }
+    { id: 1, positionSize: '1', orderType: 'market', enabled: true }
 ];
 
 let takeProfits = [
@@ -1512,7 +1512,7 @@ function copyAllWebhooks() {
 
 function getSettings() {
     const direction = document.querySelector('.toggle-btn.long.active') ? 'long' : 'short';
-    const leverage = document.querySelector('input[max="125"]')?.value || '20';
+    const leverage = document.querySelector('input[max="125"]')?.value || '100';
     const symbol = document.querySelector('.left-panel select')?.value || 'BTCUSDT';
     return { direction, leverage, symbol };
 }
@@ -1714,7 +1714,7 @@ function loadConfig(id) {
         // 兼容旧配置：使用旧的 positionSize 和 orderType
         entries = [{
             id: 1,
-            positionSize: config.positionSize?.toString() || '30',
+            positionSize: config.positionSize?.toString() || '1',
             orderType: config.orderType || 'market',
             enabled: true
         }];
