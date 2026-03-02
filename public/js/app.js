@@ -1309,11 +1309,11 @@ function renderEntries() {
 }
 
 function addEntry() {
-    entries.push({ 
-        id: entryIdCounter++, 
-        positionSize: '20', 
-        orderType: 'market', 
-        enabled: true 
+    entries.push({
+        id: entryIdCounter++,
+        positionSize: '1',
+        orderType: 'market',
+        enabled: true
     });
     renderEntries();
 }
