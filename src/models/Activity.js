@@ -14,6 +14,7 @@ const activitySchema = new mongoose.Schema({
       'config_saved',
       'config_loaded', 
       'config_deleted',
+      'config_updated',
       'tp_triggered',
       'sl_triggered',
       'order_executed',
