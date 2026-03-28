@@ -1,4 +1,4 @@
-const { User, Webhook, Order, Position, Exchange, Activity } = require('../models');
+const { User, Webhook, Order, Position, Exchange, Activity, Config } = require('../models');
 const { openPosition, closePosition, getPrice, placeProtectionStopLoss } = require('../utils/exchangeClient');
 
 /**
@@ -487,7 +487,8 @@ exports.receiveWebhook = async (req, res) => {
         };
 
         // 记录活动
-        const isTakeProfit = action === 'take_profit' || parsedTpIndex;
+        const isTakeProfit = action === 'take_profit' || !!parsedTpIndex;
+        const isStopLoss = action === 'stop_loss' || !!parsedSlIndex;
         const activityType = isTakeProfit ? 'tp_triggered' : 'sl_triggered';
         await Activity.log(user._id, activityType, 
           `${isTakeProfit ? '止盈' : '止损'}触发 平${closeSize}%仓`, 
@@ -495,24 +496,75 @@ exports.receiveWebhook = async (req, res) => {
         );
 
         // ========== 保护性止损逻辑 ==========
-        // 如果是止盈触发且设置了保护性止损，在开仓价挂止损单
-        // 支持布尔值 true 或字符串 "true"
-        const shouldSetProtectionSL = set_protection_sl === true || set_protection_sl === 'true';
+        // 1. 判断是否需要挂保护性止损：优先 webhook payload，fallback 到用户 Config
+        let shouldSetProtectionSL = set_protection_sl === true || set_protection_sl === 'true';
+        let protectionSLSource = set_protection_sl !== undefined && set_protection_sl !== null ? 'webhook' : 'none';
+        let configProtectionOrderType = null;
+
+        if (!shouldSetProtectionSL && (set_protection_sl === undefined || set_protection_sl === null)) {
+          try {
+            const userConfig = await Config.findOne({
+              user: user._id,
+              symbol: { $regex: new RegExp('^' + symbol.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i') },
+              isActive: true
+            });
+            if (userConfig && userConfig.protectionSL) {
+              shouldSetProtectionSL = true;
+              protectionSLSource = 'config';
+              configProtectionOrderType = userConfig.protectionOrderType || 'market';
+            }
+          } catch (configErr) {
+            console.log('   ⚠️ 读取用户配置失败:', configErr.message);
+          }
+        }
+
+        // 2. 判断是否为止盈操作
+        //    - 明确的 take_profit action 或有 tp_index/trigger
+        //    - 如果 Config 启用了 protectionSL 且当前不是止损操作，也视为可触发保护性止损的操作
+        const isTakeProfitForProtection = isTakeProfit || (shouldSetProtectionSL && !isStopLoss && action !== 'protection_sl');
+        const finalOrderType = protection_sl_order_type || configProtectionOrderType || 'market';
         
         console.log('\n📊 保护性止损检查:');
         console.log(`   set_protection_sl: ${set_protection_sl} (type: ${typeof set_protection_sl})`);
-        console.log(`   shouldSetProtectionSL: ${shouldSetProtectionSL}`);
-        console.log(`   isTakeProfit: ${isTakeProfit}`);
+        console.log(`   shouldSetProtectionSL: ${shouldSetProtectionSL} (来源: ${protectionSLSource})`);
+        console.log(`   isTakeProfit: ${isTakeProfit}, isTakeProfitForProtection: ${isTakeProfitForProtection}`);
+        console.log(`   isStopLoss: ${isStopLoss}, action: ${action}`);
         console.log(`   position.status: ${position.status}, quantity: ${position.quantity}`);
+        console.log(`   position.direction: ${position.direction}, entryPrice: ${position.entryPrice}`);
         
-        if (shouldSetProtectionSL && isTakeProfit) {
-          // 检查是否已挂过保护性止损
-          if (position.protectionSLPlaced) {
+        if (shouldSetProtectionSL && isTakeProfitForProtection) {
+          // 查找该交易对所有 open 持仓（分批开仓会产生多条记录）
+          const allOpenPositions = await Position.find({
+            user: user._id,
+            symbol: symbol.toUpperCase(),
+            status: 'open'
+          });
+
+          const anyProtectionPlaced = allOpenPositions.some(p => p.protectionSLPlaced);
+
+          if (anyProtectionPlaced) {
             console.log('⏭️  保护性止损已挂过，跳过');
-          } else if (position.status === 'open' && position.quantity > 0) {
-            // 检查是否还有剩余持仓需要保护
-            console.log('\n🛡️  止盈触发，准备挂保护性止损单...');
-            console.log(`   剩余持仓: ${position.quantity}, 开仓价: ${position.entryPrice}`);
+          } else if (allOpenPositions.length > 0) {
+            // 计算所有开仓记录的加权平均开仓价（真实的保本价）
+            let totalQty = 0;
+            let totalNotional = 0;
+            allOpenPositions.forEach(p => {
+              totalQty += p.quantity;
+              totalNotional += p.quantity * p.entryPrice;
+            });
+
+            const avgEntryPrice = totalQty > 0 ? totalNotional / totalQty : position.entryPrice;
+            const dirLabel = position.direction === 'long' ? '多单' : '空单';
+            const slSide = position.direction === 'long' ? 'SELL' : 'BUY';
+
+            console.log(`\n🛡️  ${dirLabel}止盈触发，准备在开仓均价挂保护性止损单...`);
+            console.log(`   方向: ${position.direction} → 止损方向: ${slSide}`);
+            console.log(`   开仓记录: ${allOpenPositions.length} 条`);
+            allOpenPositions.forEach((p, i) => {
+              console.log(`     Entry ${i + 1}: 开仓价=${p.entryPrice}, 剩余数量=${p.quantity}`);
+            });
+            console.log(`   加权平均开仓价(保本价): ${avgEntryPrice}`);
+            console.log(`   剩余总持仓: ${totalQty}`);
             
             try {
               const protectionResult = await placeProtectionStopLoss(
@@ -523,42 +575,47 @@ exports.receiveWebhook = async (req, res) => {
                 {
                   symbol: symbol.toUpperCase(),
                   direction: position.direction,
-                  quantity: position.quantity,
-                  entryPrice: position.entryPrice,
-                  orderType: (protection_sl_order_type || 'market').toUpperCase()
+                  quantity: totalQty,
+                  entryPrice: avgEntryPrice,
+                  orderType: finalOrderType.toUpperCase()
                 }
               );
 
-              // 记录保护性止损挂单成功
               result.protectionSL = {
                 success: true,
                 orderId: protectionResult.orderId,
-                stopPrice: position.entryPrice,
-                quantity: position.quantity
+                stopPrice: avgEntryPrice,
+                quantity: totalQty,
+                direction: position.direction,
+                side: slSide,
+                entries: allOpenPositions.length
               };
 
-              // 标记已挂保护性止损
-              position.protectionSLPlaced = true;
-              await position.save();
+              // 标记所有开仓记录的 protectionSLPlaced，防止重复挂单
+              await Position.updateMany(
+                {
+                  user: user._id,
+                  symbol: symbol.toUpperCase(),
+                  status: 'open'
+                },
+                { $set: { protectionSLPlaced: true } }
+              );
 
-              console.log('✅ 保护性止损单挂单成功!');
+              console.log(`✅ ${dirLabel}保护性止损单挂单成功! 触发价(均价): ${avgEntryPrice}`);
               
-              // 记录活动
               await Activity.log(user._id, 'order_executed', 
-                `挂保护性止损单 @ ${position.entryPrice}`, 
+                `${dirLabel}挂保护性止损单 @ ${avgEntryPrice} (${allOpenPositions.length}条开仓均价)`, 
                 { symbol, amount: 0 }
               );
 
             } catch (protectionError) {
               console.error('❌ 挂保护性止损单失败:', protectionError.message);
               
-              // 保护性止损失败不影响止盈的成功，但记录到结果中
               result.protectionSL = {
                 success: false,
                 error: protectionError.message
               };
 
-              // 记录失败活动
               await Activity.log(user._id, 'order_failed', 
                 `挂保护性止损单失败: ${protectionError.message}`, 
                 { symbol }
