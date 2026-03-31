@@ -148,6 +148,7 @@ exports.receiveWebhook = async (req, res) => {
     const { 
       action,           // open_long, open_short, close_long, close_short, protection_sl, take_profit, stop_loss
       symbol,           // BTCUSDT
+      direction: payloadDirection,  // "long" 或 "short"（止盈/止损需要）
       leverage,         // 20
       position_size,    // "30%"
       close_percent,    // "50%"
@@ -320,24 +321,35 @@ exports.receiveWebhook = async (req, res) => {
 
     } else if (action.startsWith('close_') || action === 'protection_sl' || action === 'take_profit' || action === 'stop_loss') {
       // 平仓操作（包括止盈、止损）
-      // 从 action 或现有持仓判断方向
+      // 方向解析优先级: 1) payload.direction  2) action名称  3) 从持仓获取
       let direction;
-      if (action.includes('long')) {
+      if (payloadDirection === 'long' || payloadDirection === 'short') {
+        direction = payloadDirection;
+      } else if (action.includes('long')) {
         direction = 'long';
       } else if (action.includes('short')) {
         direction = 'short';
       } else {
-        // take_profit/stop_loss 不包含方向，从持仓中获取
-        direction = null; // 后面从持仓获取
+        direction = null;
       }
       const closeSize = parseFloat(close_percent?.replace('%', '') || 100);
 
-      // 查找对应的持仓
-      const position = await Position.findOne({
+      // 查找对应的持仓（有方向则精确匹配，无方向则匹配任意 open 持仓）
+      const positionQuery = {
         user: user._id,
         symbol: symbol.toUpperCase(),
         status: 'open'
-      });
+      };
+      if (direction) {
+        positionQuery.direction = direction;
+      }
+      const position = await Position.findOne(positionQuery);
+
+      // 从持仓补充方向（兼容旧 webhook 无 direction 的情况）
+      if (!direction && position) {
+        direction = position.direction;
+        console.log(`📎 从持仓记录获取方向: ${direction}`);
+      }
 
       // ========== 防重复触发逻辑 ==========
       // 如果没有持仓，返回成功但不执行（适配 TradingView 每根 K 线触发）
@@ -533,12 +545,16 @@ exports.receiveWebhook = async (req, res) => {
         console.log(`   position.direction: ${position.direction}, entryPrice: ${position.entryPrice}`);
         
         if (shouldSetProtectionSL && isTakeProfitForProtection) {
-          // 查找该交易对所有 open 持仓（分批开仓会产生多条记录）
-          const allOpenPositions = await Position.find({
+          // 查找该交易对同方向所有 open 持仓（分批开仓会产生多条记录）
+          const protectionQuery = {
             user: user._id,
             symbol: symbol.toUpperCase(),
             status: 'open'
-          });
+          };
+          if (direction) {
+            protectionQuery.direction = direction;
+          }
+          const allOpenPositions = await Position.find(protectionQuery);
 
           const anyProtectionPlaced = allOpenPositions.some(p => p.protectionSLPlaced);
 
@@ -591,13 +607,9 @@ exports.receiveWebhook = async (req, res) => {
                 entries: allOpenPositions.length
               };
 
-              // 标记所有开仓记录的 protectionSLPlaced，防止重复挂单
+              // 标记同方向所有开仓记录的 protectionSLPlaced，防止重复挂单
               await Position.updateMany(
-                {
-                  user: user._id,
-                  symbol: symbol.toUpperCase(),
-                  status: 'open'
-                },
+                protectionQuery,
                 { $set: { protectionSLPlaced: true } }
               );
 

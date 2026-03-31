@@ -690,8 +690,9 @@ async function getPrice(exchangeId, symbol) {
 // ==========================================================
 
 /**
- * Binance Futures 挂止损单（STOP_MARKET）
- * 当价格触及 stopPrice 时，以市价平仓
+ * Binance Futures 挂止损单（STOP_MARKET）- 使用 Algo Order API
+ * 自 2025-12-09 起，条件单必须使用 /fapi/v1/algoOrder 端点
+ * 当价格触及 triggerPrice 时，以市价平仓
  */
 async function placeBinanceStopOrder(apiKey, apiSecret, params) {
   const config = EXCHANGE_CONFIG.binance;
@@ -702,24 +703,13 @@ async function placeBinanceStopOrder(apiKey, apiSecret, params) {
   // 获取交易对精度信息
   const symbolInfo = await getBinanceSymbolInfo(symbol);
   
-  // 格式化价格精度
-  const formattedStopPrice = parseFloat(stopPrice).toFixed(symbolInfo.pricePrecision);
+  // 格式化触发价格精度
+  const formattedTriggerPrice = parseFloat(stopPrice).toFixed(symbolInfo.pricePrecision);
   
-  // 格式化数量精度（向下取整，避免超出持仓）
-  const qtyPrecision = symbolInfo.quantityPrecision;
-  const multiplier = Math.pow(10, qtyPrecision);
-  let formattedQuantity = Math.floor(parseFloat(quantity) * multiplier) / multiplier;
+  console.log(`📐 精度处理: 触发价=${stopPrice} → ${formattedTriggerPrice}, 价格精度=${symbolInfo.pricePrecision}`);
   
-  // 确保不小于最小数量
-  if (formattedQuantity < symbolInfo.minQty) {
-    formattedQuantity = symbolInfo.minQty;
-  }
-  
-  console.log(`📐 精度处理: 原数量=${quantity}, 格式化后=${formattedQuantity}, 精度=${qtyPrecision}, 最小=${symbolInfo.minQty}`);
-  
-  // 使用 closePosition=true 来平掉该方向的所有剩余仓位
-  // 这是 Binance 推荐的止损单方式，避免 -4120 错误
-  let queryParams = `symbol=${symbol}&side=${side}&type=STOP_MARKET&closePosition=true&stopPrice=${formattedStopPrice}&timestamp=${serverTime}&recvWindow=60000`;
+  // 使用 Algo Order API，closePosition=true 平掉该方向的所有剩余仓位
+  let queryParams = `algoType=CONDITIONAL&symbol=${symbol}&side=${side}&type=STOP_MARKET&closePosition=true&triggerPrice=${formattedTriggerPrice}&timestamp=${serverTime}&recvWindow=60000`;
   
   // 双向持仓模式需要 positionSide
   if (positionSide) {
@@ -727,9 +717,9 @@ async function placeBinanceStopOrder(apiKey, apiSecret, params) {
   }
   
   const signature = createSignature(queryParams, apiSecret);
-  const url = `${config.baseUrl}/fapi/v1/order?${queryParams}&signature=${signature}`;
+  const url = `${config.baseUrl}/fapi/v1/algoOrder?${queryParams}&signature=${signature}`;
   
-  console.log(`📤 Binance 挂止损单: ${side} ${symbol} closePosition=true @ STOP_MARKET 触发价=${formattedStopPrice}`);
+  console.log(`📤 Binance Algo Order 挂止损单: ${side} ${symbol} closePosition=true @ STOP_MARKET 触发价=${formattedTriggerPrice}`);
   
   const data = await httpsRequest(url, {
     method: 'POST',
@@ -739,23 +729,22 @@ async function placeBinanceStopOrder(apiKey, apiSecret, params) {
     }
   });
   
-  if (data.code) {
-    console.error(`❌ Binance 挂止损单失败:`, data);
+  if (data.code && data.code !== 200) {
+    console.error(`❌ Binance Algo Order 挂止损单失败:`, data);
     throw new Error(data.msg || `挂止损单失败: ${data.code}`);
   }
   
-  console.log(`✅ Binance 止损单挂单成功:`, JSON.stringify(data));
+  console.log(`✅ Binance Algo Order 止损单挂单成功:`, JSON.stringify(data));
   
   return {
     success: true,
-    orderId: data.orderId,
-    clientOrderId: data.clientOrderId,
+    orderId: data.algoId,
+    clientOrderId: data.clientAlgoId,
     symbol: data.symbol,
     side: data.side,
-    type: data.type,
-    status: data.status,
-    stopPrice: parseFloat(data.stopPrice),
-    origQty: parseFloat(data.origQty),
+    type: data.orderType || 'STOP_MARKET',
+    status: data.algoStatus || 'NEW',
+    stopPrice: parseFloat(data.triggerPrice || formattedTriggerPrice),
     raw: data
   };
 }
@@ -817,56 +806,85 @@ async function placeProtectionStopLoss(exchangeId, apiKey, apiSecret, passphrase
 
 /**
  * 取消所有止损单（用于平仓后清理）
+ * 同时检查传统挂单和 Algo 条件单
  */
 async function cancelBinanceStopOrders(apiKey, apiSecret, symbol) {
   const config = EXCHANGE_CONFIG.binance;
-  const serverTime = await getBinanceServerTime();
-  
-  const params = `symbol=${symbol}&timestamp=${serverTime}&recvWindow=60000`;
-  const signature = createSignature(params, apiSecret);
-  
-  // 获取当前挂单
-  const openOrdersUrl = `${config.baseUrl}/fapi/v1/openOrders?${params}&signature=${signature}`;
-  const openOrders = await httpsRequest(openOrdersUrl, {
-    method: 'GET',
-    headers: { 'X-MBX-APIKEY': apiKey }
-  });
-  
-  if (openOrders.code) {
-    console.log('获取挂单失败:', openOrders);
-    return { success: false, message: openOrders.msg };
-  }
-  
-  // 筛选止损单
-  const stopOrders = openOrders.filter(o => 
-    o.type === 'STOP_MARKET' || o.type === 'STOP' || o.type === 'STOP_LOSS'
-  );
-  
-  if (stopOrders.length === 0) {
-    console.log('没有需要取消的止损单');
-    return { success: true, cancelled: 0 };
-  }
-  
-  console.log(`找到 ${stopOrders.length} 个止损单，准备取消...`);
-  
-  // 取消止损单
   let cancelled = 0;
-  for (const order of stopOrders) {
-    const cancelParams = `symbol=${symbol}&orderId=${order.orderId}&timestamp=${await getBinanceServerTime()}&recvWindow=60000`;
-    const cancelSig = createSignature(cancelParams, apiSecret);
-    const cancelUrl = `${config.baseUrl}/fapi/v1/order?${cancelParams}&signature=${cancelSig}`;
-    
-    const cancelResult = await httpsRequest(cancelUrl, {
-      method: 'DELETE',
+
+  // 1. 检查并取消传统挂单中的止损单
+  try {
+    const serverTime1 = await getBinanceServerTime();
+    const params1 = `symbol=${symbol}&timestamp=${serverTime1}&recvWindow=60000`;
+    const sig1 = createSignature(params1, apiSecret);
+    const openOrdersUrl = `${config.baseUrl}/fapi/v1/openOrders?${params1}&signature=${sig1}`;
+    const openOrders = await httpsRequest(openOrdersUrl, {
+      method: 'GET',
       headers: { 'X-MBX-APIKEY': apiKey }
     });
-    
-    if (!cancelResult.code) {
-      cancelled++;
-      console.log(`✅ 已取消止损单: ${order.orderId}`);
+
+    if (!openOrders.code && Array.isArray(openOrders)) {
+      const stopOrders = openOrders.filter(o =>
+        o.type === 'STOP_MARKET' || o.type === 'STOP' || o.type === 'STOP_LOSS'
+      );
+      for (const order of stopOrders) {
+        const cancelParams = `symbol=${symbol}&orderId=${order.orderId}&timestamp=${await getBinanceServerTime()}&recvWindow=60000`;
+        const cancelSig = createSignature(cancelParams, apiSecret);
+        const cancelUrl = `${config.baseUrl}/fapi/v1/order?${cancelParams}&signature=${cancelSig}`;
+        const cancelResult = await httpsRequest(cancelUrl, {
+          method: 'DELETE',
+          headers: { 'X-MBX-APIKEY': apiKey }
+        });
+        if (!cancelResult.code) {
+          cancelled++;
+          console.log(`✅ 已取消传统止损单: ${order.orderId}`);
+        }
+      }
     }
+  } catch (err) {
+    console.log('检查传统挂单失败:', err.message);
   }
-  
+
+  // 2. 检查并取消 Algo 条件单中的止损单
+  try {
+    const serverTime2 = await getBinanceServerTime();
+    const params2 = `symbol=${symbol}&timestamp=${serverTime2}&recvWindow=60000`;
+    const sig2 = createSignature(params2, apiSecret);
+    const algoOrdersUrl = `${config.baseUrl}/fapi/v1/allAlgoOrders?${params2}&signature=${sig2}`;
+    const algoOrders = await httpsRequest(algoOrdersUrl, {
+      method: 'GET',
+      headers: { 'X-MBX-APIKEY': apiKey }
+    });
+
+    if (!algoOrders.code && Array.isArray(algoOrders)) {
+      const activeAlgoStops = algoOrders.filter(o =>
+        o.algoStatus === 'NEW' &&
+        (o.orderType === 'STOP_MARKET' || o.orderType === 'STOP')
+      );
+      for (const order of activeAlgoStops) {
+        const cancelParams = `algoId=${order.algoId}&timestamp=${await getBinanceServerTime()}&recvWindow=60000`;
+        const cancelSig = createSignature(cancelParams, apiSecret);
+        const cancelUrl = `${config.baseUrl}/fapi/v1/algoOrder?${cancelParams}&signature=${cancelSig}`;
+        const cancelResult = await httpsRequest(cancelUrl, {
+          method: 'DELETE',
+          headers: { 'X-MBX-APIKEY': apiKey }
+        });
+        if (cancelResult.code === '200' || cancelResult.code === 200 || !cancelResult.code) {
+          cancelled++;
+          console.log(`✅ 已取消 Algo 止损单: ${order.algoId}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.log('检查 Algo 挂单失败:', err.message);
+  }
+
+  if (cancelled === 0) {
+    console.log('没有需要取消的止损单');
+  } else {
+    console.log(`共取消 ${cancelled} 个止损单`);
+  }
+
   return { success: true, cancelled };
 }
 
