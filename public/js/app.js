@@ -812,13 +812,17 @@ async function fetchPositions() {
                     });
                     const historyResult = await historyResponse.json();
                     if (historyResult.success && historyResult.data?.length > 0) {
-                        lastClosedPosition = historyResult.data[0];
+                        const dismissed = localStorage.getItem('tvtrade_dismissed_position');
+                        if (dismissed !== historyResult.data[0]._id) {
+                            lastClosedPosition = historyResult.data[0];
+                        }
                     }
                 } catch (e) {
                     console.log('获取历史持仓失败:', e);
                 }
             } else {
                 lastClosedPosition = null;
+                localStorage.removeItem('tvtrade_dismissed_position');
             }
             
             renderPositions();
@@ -2212,6 +2216,9 @@ function updatePosition() {
 
 // 清除最近关闭的持仓记录
 function clearLastPosition() {
+    if (lastClosedPosition && lastClosedPosition._id) {
+        localStorage.setItem('tvtrade_dismissed_position', lastClosedPosition._id);
+    }
     lastClosedPosition = null;
     updatePosition();
     showToast('已清除，准备接收新交易', 'success');
