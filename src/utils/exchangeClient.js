@@ -888,12 +888,64 @@ async function cancelBinanceStopOrders(apiKey, apiSecret, symbol) {
   return { success: true, cancelled };
 }
 
+/**
+ * 获取 Binance Futures 实际持仓（从交易所查询）
+ * 返回有持仓数量的交易对及方向
+ */
+async function getBinancePositions(apiKey, apiSecret) {
+  const config = EXCHANGE_CONFIG.binance;
+  const serverTime = await getBinanceServerTime();
+
+  const params = `timestamp=${serverTime}&recvWindow=60000`;
+  const signature = createSignature(params, apiSecret);
+  const url = `${config.baseUrl}/fapi/v2/positionRisk?${params}&signature=${signature}`;
+
+  const data = await httpsRequest(url, {
+    method: 'GET',
+    headers: { 'X-MBX-APIKEY': apiKey }
+  });
+
+  if (data.code) {
+    throw new Error(data.msg || `获取持仓失败: ${data.code}`);
+  }
+
+  // 只返回有实际持仓量的记录
+  return data
+    .filter(p => parseFloat(p.positionAmt) !== 0)
+    .map(p => {
+      const amt = parseFloat(p.positionAmt);
+      return {
+        symbol: p.symbol,
+        direction: amt > 0 ? 'long' : 'short',
+        quantity: Math.abs(amt),
+        entryPrice: parseFloat(p.entryPrice),
+        markPrice: parseFloat(p.markPrice),
+        unrealizedPnl: parseFloat(p.unRealizedProfit),
+        leverage: parseInt(p.leverage),
+        positionSide: p.positionSide
+      };
+    });
+}
+
+/**
+ * 获取交易所实际持仓（统一接口）
+ */
+async function getExchangePositions(exchangeId, apiKey, apiSecret, passphrase = '') {
+  switch (exchangeId) {
+    case 'binance':
+      return await getBinancePositions(apiKey, apiSecret);
+    default:
+      return [];
+  }
+}
+
 module.exports = {
   testExchangeConnection,
   getBalance,
   openPosition,
   closePosition,
   getPrice,
+  getExchangePositions,
   placeProtectionStopLoss,
   cancelBinanceStopOrders,
   EXCHANGE_CONFIG

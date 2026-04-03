@@ -1,6 +1,6 @@
 const Position = require('../models/Position');
 const Exchange = require('../models/Exchange');
-const { testExchangeConnection, getPrice } = require('../utils/exchangeClient');
+const { testExchangeConnection, getPrice, getExchangePositions } = require('../utils/exchangeClient');
 
 // 获取当前持仓列表
 exports.getPositions = async (req, res) => {
@@ -11,25 +11,59 @@ exports.getPositions = async (req, res) => {
     if (symbol) query.symbol = symbol.toUpperCase();
     if (status) query.status = status;
 
-    const positions = await Position.find(query)
+    let positions = await Position.find(query)
       .sort({ openedAt: -1 })
-      .lean(); // 使用 lean() 返回普通 JS 对象，便于修改
+      .lean();
 
-    // 获取用户的交易所配置
+    // 获取用户的交易所配置（需要 apiSecret 用于查询交易所持仓）
     const exchangeConfig = await Exchange.findOne({ 
       user: req.user._id,
       connected: true
-    });
+    }).select('+apiSecret +passphrase');
 
-    // 如果有开仓的持仓，获取实时价格并计算盈亏
+    // 如果查询 open 持仓，与交易所同步状态并获取实时价格
     if (status === 'open' && positions.length > 0 && exchangeConfig) {
+      let exchangePositions = [];
+      try {
+        const apiKey = exchangeConfig.apiKey;
+        const apiSecret = exchangeConfig.getDecryptedSecret();
+        const passphrase = exchangeConfig.passphrase ? exchangeConfig.getDecryptedPassphrase() : '';
+        exchangePositions = await getExchangePositions(exchangeConfig.exchange, apiKey, apiSecret, passphrase);
+      } catch (syncErr) {
+        console.log('⚠️ 获取交易所持仓失败，跳过同步:', syncErr.message);
+      }
+
+      // 记录已同步过的 symbol+direction 组合，避免重复处理
+      const syncedKeys = new Set();
+
       for (const pos of positions) {
-        try {
-          // 获取实时价格
-          const currentPrice = await getPrice(exchangeConfig.exchange, pos.symbol);
-          pos.currentPrice = currentPrice;
+        const syncKey = `${pos.symbol}_${pos.direction}`;
+
+        // 检查交易所是否还有该持仓
+        const exchangePos = exchangePositions.find(
+          ep => ep.symbol === pos.symbol && ep.direction === pos.direction
+        );
+
+        if (!exchangePos && exchangePositions.length >= 0 && !syncedKeys.has(syncKey)) {
+          // 交易所已无此持仓，自动标记为已平仓
+          syncedKeys.add(syncKey);
+          console.log(`🔄 同步: ${pos.symbol} ${pos.direction} 在交易所已无持仓，标记为 closed`);
+          await Position.updateMany(
+            { user: req.user._id, symbol: pos.symbol, direction: pos.direction, status: 'open' },
+            { $set: { 
+              status: 'closed', 
+              closeReason: 'exchange_sync',
+              closedAt: new Date()
+            }}
+          );
+          pos.status = 'closed';
+          continue;
+        }
+
+        if (exchangePos) {
+          // 用交易所实时数据更新价格和盈亏
+          pos.currentPrice = exchangePos.markPrice;
           
-          // 手动计算未实现盈亏（因为 lean() 后没有 methods）
           if (pos.currentPrice && pos.entryPrice) {
             const priceDiff = pos.direction === 'long' 
               ? pos.currentPrice - pos.entryPrice
@@ -40,13 +74,12 @@ exports.getPositions = async (req, res) => {
             
             pos.unrealizedPnl = Math.round(pnlAmount * 100) / 100;
             pos.unrealizedPnlPercent = Math.round(pnlPercent * 100) / 100;
-            
-            console.log(`📊 ${pos.symbol} 盈亏计算: 开仓价=${pos.entryPrice}, 当前价=${currentPrice}, PnL=$${pos.unrealizedPnl} (${pos.unrealizedPnlPercent}%)`);
           }
-        } catch (priceError) {
-          console.error(`获取 ${pos.symbol} 价格失败:`, priceError.message);
         }
       }
+
+      // 过滤掉已同步关闭的，只返回仍然 open 的
+      positions = positions.filter(p => p.status === 'open');
     }
 
     res.json({
