@@ -279,6 +279,7 @@ exports.getPositionHistory = async (req, res) => {
 };
 
 // 重置持仓的触发状态（允许止盈/止损再次触发）
+// 会同时重置同一交易对、同方向的所有 open 持仓（分批开仓场景）
 exports.resetPositionTriggers = async (req, res) => {
   try {
     const { resetTPs = true, resetSLs = true, resetProtectionSL = true } = req.body;
@@ -296,43 +297,75 @@ exports.resetPositionTriggers = async (req, res) => {
       });
     }
 
+    // 查找同一交易对、同方向的所有 open 持仓
+    const allRelatedPositions = await Position.find({
+      user: req.user._id,
+      symbol: position.symbol,
+      direction: position.direction,
+      status: 'open'
+    });
+
     const resetInfo = [];
+    const updateFields = {};
 
-    // 重置止盈触发记录
-    if (resetTPs && position.triggeredTPs && position.triggeredTPs.length > 0) {
-      resetInfo.push(`止盈 [${position.triggeredTPs.join(', ')}]`);
-      position.triggeredTPs = [];
+    if (resetTPs) {
+      const allTriggeredTPs = allRelatedPositions
+        .flatMap(p => p.triggeredTPs || [])
+        .filter((v, i, a) => a.indexOf(v) === i);
+      if (allTriggeredTPs.length > 0) {
+        resetInfo.push(`止盈 [${allTriggeredTPs.join(', ')}]`);
+      }
+      updateFields.triggeredTPs = [];
     }
 
-    // 重置止损触发记录
-    if (resetSLs && position.triggeredSLs && position.triggeredSLs.length > 0) {
-      resetInfo.push(`止损 [${position.triggeredSLs.join(', ')}]`);
-      position.triggeredSLs = [];
+    if (resetSLs) {
+      const allTriggeredSLs = allRelatedPositions
+        .flatMap(p => p.triggeredSLs || [])
+        .filter((v, i, a) => a.indexOf(v) === i);
+      if (allTriggeredSLs.length > 0) {
+        resetInfo.push(`止损 [${allTriggeredSLs.join(', ')}]`);
+      }
+      updateFields.triggeredSLs = [];
     }
 
-    // 重置保护性止损状态
-    if (resetProtectionSL && position.protectionSLPlaced) {
-      resetInfo.push('保护性止损');
-      position.protectionSLPlaced = false;
+    if (resetProtectionSL) {
+      const anyPlaced = allRelatedPositions.some(p => p.protectionSLPlaced);
+      if (anyPlaced) {
+        resetInfo.push('保护性止损');
+      }
+      updateFields.protectionSLPlaced = false;
     }
 
-    await position.save();
+    // 批量更新所有相关持仓
+    await Position.updateMany(
+      {
+        user: req.user._id,
+        symbol: position.symbol,
+        direction: position.direction,
+        status: 'open'
+      },
+      { $set: updateFields }
+    );
 
-    console.log(`🔄 重置持仓触发状态: ${position.symbol} - ${resetInfo.join(', ') || '无需重置'}`);
+    console.log(`🔄 重置持仓触发状态: ${position.symbol} ${position.direction} (${allRelatedPositions.length} 条记录) - ${resetInfo.join(', ') || '无需重置'}`);
 
     res.json({
       success: true,
       data: {
         positionId: position._id,
         symbol: position.symbol,
+        direction: position.direction,
+        affectedCount: allRelatedPositions.length,
         resetItems: resetInfo,
         currentState: {
-          triggeredTPs: position.triggeredTPs,
-          triggeredSLs: position.triggeredSLs,
-          protectionSLPlaced: position.protectionSLPlaced
+          triggeredTPs: [],
+          triggeredSLs: [],
+          protectionSLPlaced: false
         }
       },
-      message: resetInfo.length > 0 ? `已重置: ${resetInfo.join(', ')}` : '无需重置'
+      message: resetInfo.length > 0 
+        ? `已重置: ${resetInfo.join(', ')} (${allRelatedPositions.length} 条持仓)` 
+        : '无需重置'
     });
   } catch (error) {
     console.error('ResetPositionTriggers error:', error);
