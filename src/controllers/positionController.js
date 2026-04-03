@@ -297,11 +297,10 @@ exports.resetPositionTriggers = async (req, res) => {
       });
     }
 
-    // 查找同一交易对、同方向的所有 open 持仓
+    // 查找同一交易对所有方向的 open 持仓（多空一起重置）
     const allRelatedPositions = await Position.find({
       user: req.user._id,
       symbol: position.symbol,
-      direction: position.direction,
       status: 'open'
     });
 
@@ -336,18 +335,17 @@ exports.resetPositionTriggers = async (req, res) => {
       updateFields.protectionSLPlaced = false;
     }
 
-    // 批量更新所有相关持仓
+    // 批量更新所有相关持仓（多空一起重置）
     await Position.updateMany(
       {
         user: req.user._id,
         symbol: position.symbol,
-        direction: position.direction,
         status: 'open'
       },
       { $set: updateFields }
     );
 
-    console.log(`🔄 重置持仓触发状态: ${position.symbol} ${position.direction} (${allRelatedPositions.length} 条记录) - ${resetInfo.join(', ') || '无需重置'}`);
+    console.log(`🔄 重置持仓触发状态: ${position.symbol} 多空全部 (${allRelatedPositions.length} 条记录) - ${resetInfo.join(', ') || '无需重置'}`);
 
     res.json({
       success: true,
