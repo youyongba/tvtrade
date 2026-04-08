@@ -547,6 +547,26 @@ async function openBinancePosition(apiKey, apiSecret, params) {
     quantity: quantity.toString()
   });
   
+  // MARKET 订单返回的 avgPrice 经常为 "0"，需要从持仓查询真实成交均价
+  let entryPrice = orderResult.avgPrice;
+  if (!entryPrice || entryPrice <= 0) {
+    console.log('⚠️ 订单返回 avgPrice 为 0，从交易所持仓查询真实成交均价...');
+    try {
+      const positions = await getBinancePositions(apiKey, apiSecret);
+      const matched = positions.find(p => p.symbol === symbol && p.direction === direction);
+      if (matched && matched.entryPrice > 0) {
+        entryPrice = matched.entryPrice;
+        console.log(`✅ 从交易所获取真实成交均价: ${entryPrice}`);
+      } else {
+        entryPrice = price;
+        console.log(`⚠️ 未找到交易所持仓，使用下单前价格: ${entryPrice}`);
+      }
+    } catch (e) {
+      entryPrice = price;
+      console.log(`⚠️ 查询交易所持仓失败: ${e.message}，使用下单前价格: ${entryPrice}`);
+    }
+  }
+  
   console.log('='.repeat(60) + '\n');
   
   return {
@@ -555,7 +575,7 @@ async function openBinancePosition(apiKey, apiSecret, params) {
     symbol,
     direction,
     leverage,
-    entryPrice: orderResult.avgPrice || price,
+    entryPrice,
     quantity: orderResult.executedQty || quantity,
     margin,
     status: orderResult.status,

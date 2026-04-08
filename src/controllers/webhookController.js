@@ -1,5 +1,5 @@
 const { User, Webhook, Order, Position, Exchange, Activity, Config } = require('../models');
-const { openPosition, closePosition, getPrice, placeProtectionStopLoss } = require('../utils/exchangeClient');
+const { openPosition, closePosition, getPrice, getExchangePositions, placeProtectionStopLoss } = require('../utils/exchangeClient');
 
 /**
  * @desc    获取当前用户的 Webhook 配置
@@ -561,25 +561,43 @@ exports.receiveWebhook = async (req, res) => {
           if (anyProtectionPlaced) {
             console.log('⏭️  保护性止损已挂过，跳过');
           } else if (allOpenPositions.length > 0) {
-            // 计算所有开仓记录的加权平均开仓价（真实的保本价）
-            let totalQty = 0;
-            let totalNotional = 0;
-            allOpenPositions.forEach(p => {
-              totalQty += p.quantity;
-              totalNotional += p.quantity * p.entryPrice;
-            });
-
-            const avgEntryPrice = totalQty > 0 ? totalNotional / totalQty : position.entryPrice;
             const dirLabel = position.direction === 'long' ? '多单' : '空单';
             const slSide = position.direction === 'long' ? 'SELL' : 'BUY';
 
+            // 优先从交易所获取真实开仓均价（最准确）
+            let avgEntryPrice = null;
+            let totalQty = 0;
+            let priceSource = 'exchange';
+            try {
+              const exchangePositions = await getExchangePositions(
+                exchangeConfig.exchange, apiKey, apiSecret, passphrase
+              );
+              const matchedPos = exchangePositions.find(
+                ep => ep.symbol === symbol.toUpperCase() && ep.direction === position.direction
+              );
+              if (matchedPos && matchedPos.entryPrice > 0) {
+                avgEntryPrice = matchedPos.entryPrice;
+                totalQty = matchedPos.quantity;
+                console.log(`   ✅ 从交易所获取真实开仓均价: ${avgEntryPrice}, 持仓量: ${totalQty}`);
+              }
+            } catch (exErr) {
+              console.log(`   ⚠️ 从交易所获取持仓失败: ${exErr.message}，使用数据库计算`);
+            }
+
+            // 交易所获取失败时，从数据库计算（fallback）
+            if (!avgEntryPrice) {
+              priceSource = 'database';
+              let totalNotional = 0;
+              allOpenPositions.forEach(p => {
+                totalQty += p.quantity;
+                totalNotional += p.quantity * p.entryPrice;
+              });
+              avgEntryPrice = totalQty > 0 ? totalNotional / totalQty : position.entryPrice;
+            }
+
             console.log(`\n🛡️  ${dirLabel}止盈触发，准备在开仓均价挂保护性止损单...`);
             console.log(`   方向: ${position.direction} → 止损方向: ${slSide}`);
-            console.log(`   开仓记录: ${allOpenPositions.length} 条`);
-            allOpenPositions.forEach((p, i) => {
-              console.log(`     Entry ${i + 1}: 开仓价=${p.entryPrice}, 剩余数量=${p.quantity}`);
-            });
-            console.log(`   加权平均开仓价(保本价): ${avgEntryPrice}`);
+            console.log(`   开仓均价(保本价): ${avgEntryPrice} (来源: ${priceSource})`);
             console.log(`   剩余总持仓: ${totalQty}`);
             
             try {
