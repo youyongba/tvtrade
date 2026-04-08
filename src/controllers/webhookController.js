@@ -397,29 +397,68 @@ exports.receiveWebhook = async (req, res) => {
       }
       // ========== 防重复触发逻辑结束 ==========
 
-      // 创建订单记录（状态为 pending）
-      order = await Order.create({
-        user: user._id,
-        exchange: exchangeConfig.exchange,
-        symbol: symbol.toUpperCase(),
-        action,
-        orderType: order_type || 'market',
-        quantity: position.quantity * closeSize / 100,
-        status: 'pending',
-        source: 'webhook',
-        webhookTrigger: action === 'protection_sl' ? 'protection_sl' : 
-                        parsedTpIndex ? `tp_${parsedTpIndex}` : `sl_${parsedSlIndex || 1}`,
-        position: position._id
-      });
-
       // ========== 真实交易所平仓 ==========
       try {
         // 解密 API 密钥
         const apiKey = exchangeConfig.apiKey;
         const apiSecret = exchangeConfig.getDecryptedSecret();
         const passphrase = exchangeConfig.passphrase || '';
+
+        // 查找同方向所有 open 持仓记录（分批开仓会产生多条）
+        const allPositionQuery = {
+          user: user._id,
+          symbol: symbol.toUpperCase(),
+          status: 'open'
+        };
+        if (direction) {
+          allPositionQuery.direction = direction;
+        }
+        const allOpenPositions = await Position.find(allPositionQuery);
+
+        // 优先从交易所获取真实总持仓量（最可靠）
+        let realTotalQty = 0;
+        let qtySource = 'database';
+        try {
+          const exchangePositions = await getExchangePositions(
+            exchangeConfig.exchange, apiKey, apiSecret, passphrase
+          );
+          const matchedPos = exchangePositions.find(
+            ep => ep.symbol === symbol.toUpperCase() && ep.direction === position.direction
+          );
+          if (matchedPos && matchedPos.quantity > 0) {
+            realTotalQty = matchedPos.quantity;
+            qtySource = 'exchange';
+            console.log(`✅ 从交易所获取真实总持仓: ${realTotalQty} (来源: exchange)`);
+          }
+        } catch (exErr) {
+          console.log(`⚠️ 从交易所获取持仓失败: ${exErr.message}，使用数据库合计`);
+        }
+
+        // 交易所获取失败时，从数据库合计所有同方向 open 记录
+        if (realTotalQty <= 0) {
+          realTotalQty = allOpenPositions.reduce((sum, p) => sum + p.quantity, 0);
+          console.log(`📊 数据库合计总持仓: ${realTotalQty} (${allOpenPositions.length} 条记录)`);
+        }
+
+        const closeQuantity = closeSize >= 100 ? realTotalQty : realTotalQty * closeSize / 100;
+        console.log(`📉 平仓计算: 总持仓=${realTotalQty}(${qtySource}), 平仓比例=${closeSize}%, 平仓量=${closeQuantity}`);
+
+        // 创建订单记录（状态为 pending）
+        order = await Order.create({
+          user: user._id,
+          exchange: exchangeConfig.exchange,
+          symbol: symbol.toUpperCase(),
+          action,
+          orderType: order_type || 'market',
+          quantity: closeQuantity,
+          status: 'pending',
+          source: 'webhook',
+          webhookTrigger: action === 'protection_sl' ? 'protection_sl' : 
+                          parsedTpIndex ? `tp_${parsedTpIndex}` : `sl_${parsedSlIndex || 1}`,
+          position: position._id
+        });
         
-        // 调用交易所 API 平仓
+        // 调用交易所 API 平仓（使用真实总持仓量）
         const closeResult = await closePosition(
           exchangeConfig.exchange,
           apiKey,
@@ -428,7 +467,7 @@ exports.receiveWebhook = async (req, res) => {
           {
             symbol: symbol.toUpperCase(),
             direction: position.direction,
-            quantity: position.quantity,
+            quantity: realTotalQty,
             closePercent: closeSize,
             orderType: (order_type || 'market').toUpperCase()
           }
@@ -443,35 +482,63 @@ exports.receiveWebhook = async (req, res) => {
         order.exchangeResponse = closeResult.raw;
         await order.save();
 
-        // 计算盈亏
+        // 计算盈亏（基于所有持仓的加权均价）
+        let totalNotional = 0;
+        let totalDbQty = 0;
+        allOpenPositions.forEach(p => {
+          totalNotional += p.quantity * p.entryPrice;
+          totalDbQty += p.quantity;
+        });
+        const avgEntryPrice = totalDbQty > 0 ? totalNotional / totalDbQty : position.entryPrice;
         const priceDiff = position.direction === 'long' 
-          ? closeResult.closePrice - position.entryPrice
-          : position.entryPrice - closeResult.closePrice;
-        const closedMargin = position.margin * closeSize / 100;
-        const pnl = closedMargin * (priceDiff / position.entryPrice) * position.leverage;
+          ? closeResult.closePrice - avgEntryPrice
+          : avgEntryPrice - closeResult.closePrice;
+        const totalMargin = allOpenPositions.reduce((sum, p) => sum + p.margin, 0);
+        const closedMargin = totalMargin * closeSize / 100;
+        const pnl = closedMargin * (priceDiff / avgEntryPrice) * position.leverage;
 
-        // 更新持仓
+        // 更新持仓记录
         if (closeSize >= 100) {
-          // 全部平仓
+          // 全部平仓 → 关闭所有同方向 open 记录
+          const closeReason = action === 'protection_sl' ? 'stop_loss' : 
+                              (action === 'take_profit' || parsedTpIndex) ? 'take_profit' : 'stop_loss';
+          await Position.updateMany(allPositionQuery, {
+            $set: {
+              status: 'closed',
+              closePrice: closeResult.closePrice,
+              closedAt: new Date(),
+              closeReason,
+              realizedPnl: Math.round(pnl * 100) / 100
+            }
+          });
           position.status = 'closed';
           position.closePrice = closeResult.closePrice;
           position.closedAt = new Date();
-          position.closeReason = action === 'protection_sl' ? 'stop_loss' : 
-                                  (action === 'take_profit' || parsedTpIndex) ? 'take_profit' : 'stop_loss';
+          position.closeReason = closeReason;
           position.realizedPnl = Math.round(pnl * 100) / 100;
         } else {
-          // 部分平仓
-          position.quantity = position.quantity * (1 - closeSize / 100);
-          position.margin = position.margin * (1 - closeSize / 100);
+          // 部分平仓 → 按比例缩减所有同方向 open 记录
+          const keepRatio = 1 - closeSize / 100;
+          for (const pos of allOpenPositions) {
+            pos.quantity = pos.quantity * keepRatio;
+            pos.margin = pos.margin * keepRatio;
+            await Position.updateOne({ _id: pos._id }, { $set: { quantity: pos.quantity, margin: pos.margin } });
+          }
+          position.quantity = position.quantity * keepRatio;
+          position.margin = position.margin * keepRatio;
         }
         
         // ========== 记录已触发的止盈/止损（防止重复触发）==========
+        // 同步标记到所有同方向 open 持仓记录，避免 findOne 取到未标记的记录
         if (parsedTpIndex && (action === 'take_profit' || parsedTpIndex)) {
           if (!position.triggeredTPs) position.triggeredTPs = [];
           if (!position.triggeredTPs.includes(parsedTpIndex)) {
             position.triggeredTPs.push(parsedTpIndex);
             console.log(`✅ 记录止盈 ${parsedTpIndex} 已触发，当前已触发: [${position.triggeredTPs.join(', ')}]`);
           }
+          await Position.updateMany(allPositionQuery, {
+            $addToSet: { triggeredTPs: parsedTpIndex }
+          });
         }
         if (parsedSlIndex && (action === 'stop_loss' || parsedSlIndex)) {
           if (!position.triggeredSLs) position.triggeredSLs = [];
@@ -479,6 +546,9 @@ exports.receiveWebhook = async (req, res) => {
             position.triggeredSLs.push(parsedSlIndex);
             console.log(`✅ 记录止损 ${parsedSlIndex} 已触发，当前已触发: [${position.triggeredSLs.join(', ')}]`);
           }
+          await Position.updateMany(allPositionQuery, {
+            $addToSet: { triggeredSLs: parsedSlIndex }
+          });
         }
         // ========== 记录结束 ==========
         
