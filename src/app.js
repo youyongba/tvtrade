@@ -60,6 +60,24 @@ app.get('/reset-password/:token', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// ========== 全局错误兜底 ==========
+// 防止单个未捕获错误把进程拉崩，进而导致重启风暴
+process.on('unhandledRejection', (reason, p) => {
+  console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
+// 优雅退出
+const gracefulShutdown = (signal) => {
+  console.log(`Received ${signal}, shutting down...`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 10_000).unref();
+};
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 module.exports = app;

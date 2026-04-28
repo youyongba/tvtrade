@@ -27,57 +27,88 @@ const EXCHANGE_CONFIG = {
   }
 };
 
-// 获取代理 agent
-function getProxyAgent() {
-  const proxyUrl = process.env.PROXY_URL || process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY;
+// ---- HTTP Agent 单例（关键：复用 TCP + 复用 TLS 会话，避免每次握手）----
+const KEEPALIVE_OPTS = {
+  keepAlive: true,
+  keepAliveMsecs: 30_000,
+  maxSockets: 32,
+  maxFreeSockets: 8,
+  scheduling: 'lifo',
+  timeout: 30_000
+};
+
+let _proxyAgent = null;
+let _httpsAgent = null;
+
+function getAgent() {
+  const proxyUrl =
+    process.env.PROXY_URL ||
+    process.env.https_proxy || process.env.HTTPS_PROXY ||
+    process.env.http_proxy || process.env.HTTP_PROXY;
+
   if (proxyUrl) {
-    console.log('Using proxy:', proxyUrl);
-    return new HttpsProxyAgent(proxyUrl);
+    if (!_proxyAgent) {
+      _proxyAgent = new HttpsProxyAgent(proxyUrl, KEEPALIVE_OPTS);
+      console.log('[exchangeClient] Proxy agent initialized:', proxyUrl);
+    }
+    return _proxyAgent;
   }
-  return null;
+  if (!_httpsAgent) {
+    _httpsAgent = new https.Agent(KEEPALIVE_OPTS);
+  }
+  return _httpsAgent;
 }
 
 // 发起 HTTPS 请求（支持 POST body）
 function httpsRequest(url, options = {}) {
   return new Promise((resolve, reject) => {
     const targetUrl = new URL(url);
-    const agent = getProxyAgent();
     const body = options.body || '';
-    
+
     const reqOptions = {
       hostname: targetUrl.hostname,
-      port: 443,
+      port: targetUrl.port || 443,
       path: targetUrl.pathname + targetUrl.search,
       method: options.method || 'GET',
       headers: {
         ...options.headers,
         ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {})
       },
-      agent: agent,
-      timeout: 30000
+      agent: getAgent(),
+      timeout: options.timeout ?? 15_000
     };
-    
+
     const req = https.request(reqOptions, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
+      // 用 Buffer 数组累积，避免 String += 的 O(n²) 问题
+      const chunks = [];
+      let totalLen = 0;
+      const MAX_BYTES = 8 * 1024 * 1024;
+
+      res.on('data', (chunk) => {
+        totalLen += chunk.length;
+        if (totalLen > MAX_BYTES) {
+          req.destroy(new Error('Response too large'));
+          return;
+        }
+        chunks.push(chunk);
+      });
       res.on('end', () => {
+        const buf = Buffer.concat(chunks, totalLen);
         try {
-          resolve(JSON.parse(data));
+          resolve(JSON.parse(buf.toString('utf8')));
         } catch (e) {
-          reject(new Error(`Invalid JSON: ${data.slice(0, 100)}`));
+          reject(new Error(`Invalid JSON: ${buf.toString('utf8').slice(0, 200)}`));
         }
       });
+      res.on('error', reject);
     });
-    
+
     req.on('error', reject);
     req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Request timeout'));
+      req.destroy(new Error('Request timeout'));
     });
-    
-    if (body) {
-      req.write(body);
-    }
+
+    if (body) req.write(body);
     req.end();
   });
 }
@@ -89,12 +120,24 @@ function createSignature(queryString, secret) {
 
 /**
  * 获取 Binance 服务器时间
+ * 缓存本地时间偏移量，每 60s 刷新一次，避免高频调用 /time
  */
+let _binanceTimeOffset = 0;
+let _binanceTimeFetchedAt = 0;
+const TIME_OFFSET_TTL_MS = 60 * 1000;
+
 async function getBinanceServerTime() {
+  const now = Date.now();
+  if (now - _binanceTimeFetchedAt < TIME_OFFSET_TTL_MS) {
+    return now + _binanceTimeOffset;
+  }
   const data = await httpsRequest('https://fapi.binance.com/fapi/v1/time', {
-    method: 'GET'
+    method: 'GET',
+    timeout: 8_000
   });
-  return data.serverTime;
+  _binanceTimeOffset = data.serverTime - Date.now();
+  _binanceTimeFetchedAt = Date.now();
+  return Date.now() + _binanceTimeOffset;
 }
 
 /**
@@ -355,24 +398,51 @@ async function getBinancePrice(symbol) {
 
 /**
  * 获取 Binance Futures 交易对信息（精度等）
+ * 带 TTL 缓存 + 单飞（singleflight），避免并发重复拉取 1.5MB 大响应
  */
+const SYMBOL_INFO_TTL_MS = 6 * 60 * 60 * 1000; // 6 小时
+const _symbolInfoCache = new Map();           // symbol -> { value, expireAt }
+let _symbolInfoLoading = null;                 // 进行中的 exchangeInfo Promise
+
+async function _loadAllBinanceSymbolInfo() {
+  if (_symbolInfoLoading) return _symbolInfoLoading;
+  _symbolInfoLoading = (async () => {
+    try {
+      const data = await httpsRequest(
+        'https://fapi.binance.com/fapi/v1/exchangeInfo',
+        { method: 'GET', timeout: 20_000 }
+      );
+      if (data.code) throw new Error(data.msg || `获取交易对信息失败: ${data.code}`);
+      const expireAt = Date.now() + SYMBOL_INFO_TTL_MS;
+      for (const s of data.symbols) {
+        const minQty = parseFloat(
+          s.filters.find(f => f.filterType === 'LOT_SIZE')?.minQty || 0.001
+        );
+        _symbolInfoCache.set(s.symbol, {
+          value: {
+            pricePrecision: s.pricePrecision,
+            quantityPrecision: s.quantityPrecision,
+            minQty
+          },
+          expireAt
+        });
+      }
+    } finally {
+      _symbolInfoLoading = null;
+    }
+  })();
+  return _symbolInfoLoading;
+}
+
 async function getBinanceSymbolInfo(symbol) {
-  const url = 'https://fapi.binance.com/fapi/v1/exchangeInfo';
-  const data = await httpsRequest(url, { method: 'GET' });
-  if (data.code) {
-    throw new Error(data.msg || `获取交易对信息失败: ${data.code}`);
-  }
-  const symbolInfo = data.symbols.find(s => s.symbol === symbol);
-  if (!symbolInfo) {
-    throw new Error(`交易对 ${symbol} 不存在`);
-  }
-  
-  // 获取精度
-  const pricePrecision = symbolInfo.pricePrecision;
-  const quantityPrecision = symbolInfo.quantityPrecision;
-  const minQty = parseFloat(symbolInfo.filters.find(f => f.filterType === 'LOT_SIZE')?.minQty || 0.001);
-  
-  return { pricePrecision, quantityPrecision, minQty };
+  const cached = _symbolInfoCache.get(symbol);
+  if (cached && cached.expireAt > Date.now()) return cached.value;
+
+  await _loadAllBinanceSymbolInfo();
+
+  const fresh = _symbolInfoCache.get(symbol);
+  if (!fresh) throw new Error(`交易对 ${symbol} 不存在`);
+  return fresh.value;
 }
 
 /**

@@ -1,6 +1,21 @@
 const { User, Webhook, Order, Position, Exchange, Activity, Config } = require('../models');
 const { openPosition, closePosition, getPrice, getExchangePositions, placeProtectionStopLoss } = require('../utils/exchangeClient');
 
+// ===== 进程内并发锁（按 user+symbol+action 维度去重）=====
+// 防止 TradingView 重试 / 同一信号在前一个 handler 还没结束时被并发处理
+const _inflight = new Map(); // key -> Promise
+function withLock(key, fn) {
+  const prev = _inflight.get(key);
+  const next = (prev || Promise.resolve())
+    .catch(() => {})
+    .then(fn)
+    .finally(() => {
+      if (_inflight.get(key) === next) _inflight.delete(key);
+    });
+  _inflight.set(key, next);
+  return next;
+}
+
 /**
  * @desc    获取当前用户的 Webhook 配置
  * @route   GET /api/webhook
@@ -114,18 +129,34 @@ exports.regenerateWebhook = async (req, res) => {
  */
 exports.receiveWebhook = async (req, res) => {
   const { token } = req.params;
-  const payload = req.body;
+  const payload = req.body || {};
   const receivedAt = new Date();
 
-  // ========== 打印 TradingView Webhook 接收信息 ==========
-  console.log('\n' + '='.repeat(60));
-  console.log('📡 WEBHOOK RECEIVED:', receivedAt.toISOString());
-  console.log('='.repeat(60));
-  console.log('Token:', token?.slice(0, 15) + '...');
-  console.log('Payload JSON:');
-  console.log(JSON.stringify(payload, null, 2));
-  console.log('='.repeat(60) + '\n');
+  // 简化日志：默认仅一行；详细模式由 LOG_VERBOSE=1 控制
+  if (process.env.LOG_VERBOSE === '1') {
+    console.log('\n' + '='.repeat(60));
+    console.log('📡 WEBHOOK RECEIVED:', receivedAt.toISOString());
+    console.log('Token:', token?.slice(0, 10) + '...', 'Payload:', JSON.stringify(payload));
+    console.log('='.repeat(60));
+  } else {
+    console.log(`📡 webhook ${receivedAt.toISOString()} action=${payload.action} symbol=${payload.symbol}`);
+  }
 
+  // 用 user+symbol+action 做并发锁（请求未到达 user 之前先按 token 锁）
+  const lockKey = `${token}:${payload.symbol || '_'}:${payload.action || '_'}`;
+  return withLock(lockKey, () => _doReceiveWebhook(req, res, token, payload))
+    .catch((err) => {
+      console.error('ReceiveWebhook unexpected error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: { code: 'INTERNAL_ERROR', message: '处理 Webhook 失败' }
+        });
+      }
+    });
+};
+
+async function _doReceiveWebhook(req, res, token, payload) {
   try {
     // 1. 验证 token 并找到用户
     const user = await User.findOne({ webhookToken: token });
@@ -517,13 +548,19 @@ exports.receiveWebhook = async (req, res) => {
           position.closeReason = closeReason;
           position.realizedPnl = Math.round(pnl * 100) / 100;
         } else {
-          // 部分平仓 → 按比例缩减所有同方向 open 记录
+          // 部分平仓 → 按比例缩减所有同方向 open 记录（一次性 bulkWrite）
           const keepRatio = 1 - closeSize / 100;
-          for (const pos of allOpenPositions) {
+          const ops = allOpenPositions.map(pos => {
             pos.quantity = pos.quantity * keepRatio;
             pos.margin = pos.margin * keepRatio;
-            await Position.updateOne({ _id: pos._id }, { $set: { quantity: pos.quantity, margin: pos.margin } });
-          }
+            return {
+              updateOne: {
+                filter: { _id: pos._id },
+                update: { $set: { quantity: pos.quantity, margin: pos.margin } }
+              }
+            };
+          });
+          if (ops.length) await Position.bulkWrite(ops, { ordered: false });
           position.quantity = position.quantity * keepRatio;
           position.margin = position.margin * keepRatio;
         }
@@ -757,33 +794,26 @@ exports.receiveWebhook = async (req, res) => {
       });
     }
 
-    // 6. 更新统计并返回成功
     await webhook.incrementReceived(true);
 
-    // ========== 打印处理结果 ==========
-    console.log('\n' + '-'.repeat(60));
-    console.log('✅ WEBHOOK PROCESSED SUCCESSFULLY');
-    console.log('-'.repeat(60));
-    console.log('Result:');
-    console.log(JSON.stringify(result, null, 2));
-    console.log('-'.repeat(60) + '\n');
+    if (process.env.LOG_VERBOSE === '1') {
+      console.log('✅ WEBHOOK PROCESSED:', JSON.stringify(result));
+    } else {
+      console.log(`✅ webhook done action=${payload.action} symbol=${payload.symbol}`);
+    }
 
-    res.status(200).json({
-      success: true,
-      data: result
-    });
+    res.status(200).json({ success: true, data: result });
 
   } catch (error) {
     console.error('ReceiveWebhook error:', error);
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: '处理 Webhook 失败'
-      }
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: '处理 Webhook 失败' }
+      });
+    }
   }
-};
+}
 
 /**
  * @desc    更新后端地址
