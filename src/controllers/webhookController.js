@@ -306,6 +306,19 @@ async function _doReceiveWebhook(req, res, token, payload) {
           openedAt: new Date()
         });
 
+        // 开仓 = 新一轮交易周期开始，清空该方向所有 open 持仓上的 TP/SL 已触发标记
+        // （分批加仓时旧记录可能残留 triggeredTPs/triggeredSLs，会导致新周期的止盈/止损被误判为"已触发"而跳过）
+        const resetResult = await Position.updateMany(
+          {
+            user: user._id,
+            symbol: symbol.toUpperCase(),
+            direction,
+            status: 'open'
+          },
+          { $set: { triggeredTPs: [], triggeredSLs: [] } }
+        );
+        console.log(`🔄 已清空 ${symbol.toUpperCase()} ${direction} 方向 TP/SL 触发标记 (${resetResult.modifiedCount} 条持仓)`);
+
         result = {
           orderId: order._id,
           exchangeOrderId: orderResult.orderId,
