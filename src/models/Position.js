@@ -42,6 +42,11 @@ const positionSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  // 开仓时的原始数量（部分平仓不缩减，用于按原始仓位百分比止盈）
+  initialQuantity: {
+    type: Number,
+    default: 0
+  },
   margin: {
     type: Number,
     required: true

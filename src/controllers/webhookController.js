@@ -301,6 +301,7 @@ async function _doReceiveWebhook(req, res, token, payload) {
           entryPrice: orderResult.entryPrice,
           currentPrice: orderResult.entryPrice,
           quantity: orderResult.quantity,
+          initialQuantity: orderResult.quantity,
           margin: orderResult.margin,
           status: 'open',
           openedAt: new Date()
@@ -485,8 +486,24 @@ async function _doReceiveWebhook(req, res, token, payload) {
           console.log(`📊 数据库合计总持仓: ${realTotalQty} (${allOpenPositions.length} 条记录)`);
         }
 
-        const closeQuantity = closeSize >= 100 ? realTotalQty : realTotalQty * closeSize / 100;
-        console.log(`📉 平仓计算: 总持仓=${realTotalQty}(${qtySource}), 平仓比例=${closeSize}%, 平仓量=${closeQuantity}`);
+        // ===== 按"原始仓位"的百分比计算平仓量（而非当前剩余仓位的百分比）=====
+        // 原始总仓位 = 各条 open 记录的开仓原始数量之和（旧记录无 initialQuantity 时退回当前 quantity）
+        const originalTotalQty = allOpenPositions.reduce(
+          (sum, p) => sum + (p.initialQuantity || p.quantity), 0
+        ) || realTotalQty;
+
+        let closeQuantity;
+        if (closeSize >= 100) {
+          closeQuantity = realTotalQty;
+        } else {
+          // 例：原始 0.076，TP1/TP2 各 50% → 每次都平 0.038，而不是剩余的 50%
+          closeQuantity = Math.min(originalTotalQty * closeSize / 100, realTotalQty);
+        }
+        // 剩余仓位不足本次应平数量时，视为全部平仓
+        const isFullClose = closeSize >= 100 || closeQuantity >= realTotalQty;
+        // 交易所客户端按"传入数量 × closePercent"下单，这里换算成相对当前剩余仓位的比例
+        const effectiveClosePercent = isFullClose ? 100 : (closeQuantity / realTotalQty) * 100;
+        console.log(`📉 平仓计算: 原始总仓位=${originalTotalQty}, 当前剩余=${realTotalQty}(${qtySource}), 止盈比例=${closeSize}%(按原始仓位), 平仓量=${closeQuantity}, 相对剩余=${effectiveClosePercent.toFixed(2)}%`);
 
         // 创建订单记录（状态为 pending）
         order = await Order.create({
@@ -513,7 +530,7 @@ async function _doReceiveWebhook(req, res, token, payload) {
             symbol: symbol.toUpperCase(),
             direction: position.direction,
             quantity: realTotalQty,
-            closePercent: closeSize,
+            closePercent: effectiveClosePercent,
             orderType: (order_type || 'market').toUpperCase()
           }
         );
@@ -539,11 +556,12 @@ async function _doReceiveWebhook(req, res, token, payload) {
           ? closeResult.closePrice - avgEntryPrice
           : avgEntryPrice - closeResult.closePrice;
         const totalMargin = allOpenPositions.reduce((sum, p) => sum + p.margin, 0);
-        const closedMargin = totalMargin * closeSize / 100;
+        // 按实际平掉的（相对剩余仓位的）比例分摊保证金
+        const closedMargin = totalMargin * effectiveClosePercent / 100;
         const pnl = closedMargin * (priceDiff / avgEntryPrice) * position.leverage;
 
         // 更新持仓记录
-        if (closeSize >= 100) {
+        if (isFullClose) {
           // 全部平仓 → 关闭所有同方向 open 记录
           const closeReason = action === 'protection_sl' ? 'stop_loss' : 
                               (action === 'take_profit' || parsedTpIndex) ? 'take_profit' : 'stop_loss';
@@ -562,8 +580,9 @@ async function _doReceiveWebhook(req, res, token, payload) {
           position.closeReason = closeReason;
           position.realizedPnl = Math.round(pnl * 100) / 100;
         } else {
-          // 部分平仓 → 按比例缩减所有同方向 open 记录（一次性 bulkWrite）
-          const keepRatio = 1 - closeSize / 100;
+          // 部分平仓 → 按实际平掉比例缩减所有同方向 open 记录（一次性 bulkWrite）
+          // 注意：只缩减 quantity/margin，不动 initialQuantity（保留原始仓位基准）
+          const keepRatio = 1 - effectiveClosePercent / 100;
           const ops = allOpenPositions.map(pos => {
             pos.quantity = pos.quantity * keepRatio;
             pos.margin = pos.margin * keepRatio;
